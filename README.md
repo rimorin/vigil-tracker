@@ -1,5 +1,7 @@
 # Personal Web Activity Tracker
 
+> **⚠️ macOS only** — this tool uses AppleScript, launchd, and macOS-specific APIs. It does not run on Windows or Linux.
+
 A macOS background service that monitors your daily web browsing across all major browsers, uses **OpenAI** to generate an intelligent summary, and emails the digest to you (and optionally an accountability partner) on a configurable schedule — hourly, daily, weekly, or monthly — via **MailerSend**.
 
 ---
@@ -56,7 +58,30 @@ personal_tracker/
 
 Complete **all** of the following before running `install.sh`.
 
-### 1. macOS with Python 3.8+
+### 1. macOS version
+
+| macOS Version | Status | Notes |
+|---|---|---|
+| 15 Sequoia (2024) | ⚠️ Use with caution | `launchctl load/unload` deprecated; see note below |
+| 14 Sonoma (2023) | ⚠️ Use with caution | `launchctl load/unload` deprecated; see note below |
+| 13 Ventura (2022) | ⚠️ Use with caution | `launchctl load/unload` deprecated; see note below |
+| 12 Monterey (2021) | ✅ Fully supported | |
+| 11 Big Sur (2020) | ✅ Fully supported | |
+| 10.15 Catalina (2019) | ✅ Minimum supported | |
+| 10.14 Mojave or earlier | ❌ Not supported | Automation privacy permissions not enforced; AppleScript behaviour differs |
+
+> **Ventura / Sonoma / Sequoia note:** Apple deprecated `launchctl load` and `launchctl unload` in macOS 13+. The install and uninstall scripts use these legacy commands, which may fail silently on newer systems. If services don't start after installation, run the following manually:
+> ```bash
+> # Load (replace with your username UID from: id -u)
+> launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.tracker.web.plist
+> launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.tracker.summary.plist
+>
+> # Unload
+> launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.tracker.web.plist
+> launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.tracker.summary.plist
+> ```
+
+### 2. Python 3.8+
 
 ```bash
 python3 --version   # must be 3.8 or higher
@@ -68,30 +93,32 @@ Install via [Homebrew](https://brew.sh) if needed:
 brew install python
 ```
 
-### 2. Accessibility & Automation permissions
+### 3. Accessibility & Automation permissions
 
-The tracker uses AppleScript to read browser tabs — including private/incognito windows. Grant permissions in:
+The tracker uses AppleScript to read browser tabs — including private/incognito windows. These permissions are required on **macOS 10.15 Catalina and later**.
 
-> **System Settings → Privacy & Security → Accessibility**
-> Add your Terminal app (or the app you launch the script from).
+On **macOS 13 Ventura and later** (System Settings):
+> **System Settings → Privacy & Security → Accessibility** — add Terminal
+> **System Settings → Privacy & Security → Automation** — allow Terminal to control Safari, Chrome, etc.
 
-> **System Settings → Privacy & Security → Automation**
-> Allow your Terminal app to control Safari, Google Chrome, etc.
+On **macOS 10.15–12 Monterey** (System Preferences):
+> **System Preferences → Security & Privacy → Privacy → Accessibility** — add Terminal
+> **System Preferences → Security & Privacy → Privacy → Automation** — allow Terminal to control browsers
 
-### 3. OpenAI API key
+### 4. OpenAI API key
 
 1. Sign up at [platform.openai.com](https://platform.openai.com)
 2. Create an API key at **API Keys → Create new secret key**
 3. Ensure your account has billing enabled (gpt-4o-mini is very cheap — ~$0.001 per digest)
 
-### 4. MailerSend account & API key
+### 5. MailerSend account & API key
 
 1. Sign up at [mailersend.com](https://www.mailersend.com)
 2. Add and verify a **sender domain** (e.g. `tracker.yourdomain.com`)
 3. Go to **API Tokens → Generate new token** with *Full access* or at minimum *Email send* permission
 4. Note the verified sender email address you will use as `MAILERSEND_FROM`
 
-### 5. Configure `.env`
+### 6. Configure `.env`
 
 ```bash
 cp .env.template .env
@@ -191,10 +218,10 @@ You will be prompted whether to also delete log files and your `.env`.
 
 ## 🧰 Tech Stack
 
-| Component | Library / Service |
-|---|---|
-| Browser polling | AppleScript via `subprocess` |
-| Scheduling | [APScheduler](https://apscheduler.readthedocs.io/) |
-| AI summarisation | [OpenAI Python SDK](https://github.com/openai/openai-python) |
-| Email delivery | [MailerSend REST API](https://developers.mailersend.com/) |
-| macOS daemon | launchd (`~/Library/LaunchAgents/`) |
+| Component | Library / Service | macOS requirement |
+|---|---|---|
+| Browser polling | AppleScript via `subprocess` | 10.15 Catalina+ (Automation permission) |
+| Scheduling | [APScheduler](https://apscheduler.readthedocs.io/) | — |
+| AI summarisation | [OpenAI Python SDK](https://github.com/openai/openai-python) | — |
+| Email delivery | [MailerSend REST API](https://developers.mailersend.com/) | — |
+| macOS daemon | launchd (`~/Library/LaunchAgents/`) | 10.15 Catalina+ (`load/unload` deprecated on 13+) |
