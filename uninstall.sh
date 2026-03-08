@@ -107,5 +107,18 @@ if [[ -f "$ENV_FILE" ]]; then
     fi
 fi
 
+# ── Optionally remove virtual environment ─────────────────────────────────
+VENV_DIR="$SCRIPT_DIR/.venv"
+if [[ -d "$VENV_DIR" ]]; then
+    echo ""
+    read -r -p "$(echo -e "${YELLOW}Delete Python virtual environment (.venv)?${NC} [y/N] ")" DELETE_VENV
+    if [[ "$DELETE_VENV" =~ ^[Yy]$ ]]; then
+        rm -rf "$VENV_DIR"
+        info "Deleted .venv"
+    else
+        info ".venv kept."
+    fi
+fi
+
 echo ""
 echo -e "${GREEN}✅  Uninstall complete. Vigil has been removed.${NC}"

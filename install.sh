@@ -100,6 +100,15 @@ if [[ "${1:-}" == "--status" ]]; then
     exit 0
 fi
 
+# ── --reinstall flag ───────────────────────────────────────────────────────
+# Skips the setup wizard, credential checks, and permission prompt.
+# Use after moving the project directory or to pick up code changes.
+REINSTALL=false
+if [[ "${1:-}" == "--reinstall" ]]; then
+    REINSTALL=true
+    info "Reinstall mode — skipping wizard and credential checks."
+fi
+
 # ── Prerequisites ──────────────────────────────────────────────────────────
 step "Checking prerequisites..."
 
@@ -154,6 +163,8 @@ EOF
 fi
 
 # ── Setup wizard — create / complete .env ─────────────────────────────────
+if [[ "$REINSTALL" == false ]]; then
+
 step "Checking configuration..."
 
 # Read a value from .env (returns empty string if key is absent or a placeholder)
@@ -229,6 +240,64 @@ if [[ ${#MISSING_VARS[@]} -gt 0 ]]; then
     done
 fi
 
+# ── Schedule wizard ────────────────────────────────────────────────────────
+CURRENT_SCHEDULE=$(read_env_value "SUMMARY_SCHEDULE")
+if [[ -z "$CURRENT_SCHEDULE" ]]; then
+    echo ""
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}  🕐  Digest schedule${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo "  How often would you like to receive your browsing digest?"
+    echo ""
+    echo "  1) daily    — once a day at a chosen time  (recommended)"
+    echo "  2) hourly   — every hour"
+    echo "  3) weekly   — once a week on a chosen day"
+    echo "  4) monthly  — once a month on a chosen day"
+    echo ""
+    while true; do
+        read -r -p "  Choice [1-4, default 1]: " sched_choice
+        sched_choice="${sched_choice:-1}"
+        case "$sched_choice" in 1|2|3|4) break ;; esac
+        echo -e "  ${RED}Enter 1, 2, 3, or 4.${NC}"
+    done
+
+    case "$sched_choice" in
+        1)
+            write_env_value "SUMMARY_SCHEDULE" "daily"
+            read -r -p "  Hour to send (0-23, default 21): " sched_hour
+            write_env_value "SUMMARY_SCHEDULE_HOUR" "${sched_hour:-21}"
+            info "Schedule: daily at ${sched_hour:-21}:00 ✓"
+            ;;
+        2)
+            write_env_value "SUMMARY_SCHEDULE" "hourly"
+            read -r -p "  Minute past the hour to send (0-59, default 0): " sched_min
+            write_env_value "SUMMARY_SCHEDULE_MINUTE" "${sched_min:-0}"
+            info "Schedule: hourly at :${sched_min:-00} ✓"
+            ;;
+        3)
+            write_env_value "SUMMARY_SCHEDULE" "weekly"
+            echo "  Day of week: mon tue wed thu fri sat sun"
+            read -r -p "  Day (default mon): " sched_day
+            write_env_value "SUMMARY_SCHEDULE_WEEKDAY" "${sched_day:-mon}"
+            read -r -p "  Hour to send (0-23, default 9): " sched_hour
+            write_env_value "SUMMARY_SCHEDULE_HOUR" "${sched_hour:-9}"
+            info "Schedule: weekly on ${sched_day:-mon} at ${sched_hour:-9}:00 ✓"
+            ;;
+        4)
+            write_env_value "SUMMARY_SCHEDULE" "monthly"
+            read -r -p "  Day of month (1-28, default 1): " sched_dom
+            write_env_value "SUMMARY_SCHEDULE_DAY" "${sched_dom:-1}"
+            read -r -p "  Hour to send (0-23, default 9): " sched_hour
+            write_env_value "SUMMARY_SCHEDULE_HOUR" "${sched_hour:-9}"
+            info "Schedule: monthly on day ${sched_dom:-1} at ${sched_hour:-9}:00 ✓"
+            ;;
+    esac
+    echo ""
+fi
+
+fi # end REINSTALL=false wizard block
+
 # ── Load .env ──────────────────────────────────────────────────────────────
 set -a
 # shellcheck disable=SC1090
@@ -255,6 +324,7 @@ case "$SUMMARY_SCHEDULE" in
 esac
 
 # ── Pre-flight credential validation ──────────────────────────────────────
+if [[ "$REINSTALL" == false ]]; then
 step "Validating API credentials..."
 
 OPENAI_HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
@@ -310,9 +380,20 @@ else
     info "macOS permissions already granted ✓"
 fi
 
-# ── Install Python dependencies ────────────────────────────────────────────
-step "Installing Python dependencies..."
-info "Using Python: $PYTHON_PATH"
+fi # end REINSTALL=false validation block
+
+# ── Set up project-local virtual environment ──────────────────────────────
+step "Setting up Python environment..."
+VENV_DIR="$SCRIPT_DIR/.venv"
+if [[ ! -d "$VENV_DIR" ]]; then
+    "$PYTHON_PATH" -m venv "$VENV_DIR"
+    info "Created virtual environment at .venv ✓"
+else
+    info "Virtual environment already exists ✓"
+fi
+# Use the venv Python for everything from here on (services, fill_plist, email)
+PYTHON_PATH="$VENV_DIR/bin/python3"
+"$PYTHON_PATH" -m pip install -q --upgrade pip
 "$PYTHON_PATH" -m pip install -q -r "$SCRIPT_DIR/requirements.txt"
 info "Dependencies installed ✓"
 
@@ -374,5 +455,6 @@ echo ""
 echo "  Tracker logs    : $SCRIPT_DIR/tracker_daemon.log"
 echo "  Summarizer logs : $SCRIPT_DIR/summarizer_daemon.log"
 echo "  Check status    : bash $SCRIPT_DIR/install.sh --status"
+echo "  Reinstall       : bash $SCRIPT_DIR/install.sh --reinstall"
 echo "  To uninstall    : bash $SCRIPT_DIR/uninstall.sh"
 echo ""
