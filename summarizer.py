@@ -127,7 +127,7 @@ Guidelines:
 - Categories: group sites into buckets like Productivity, Social Media, News, Entertainment, Research, Other.
 - Timeline Highlights: pick 3-5 interesting or notable moments from the day.
 - Concern Flags: explicitly check for visits to adult content, pornography, gambling, self-harm, or
-  substance abuse sites. If any are found, list each domain with visit count and estimated time spent
+  substance abuse sites. If any are found, list each domain with visit count
   using inline style color:#c0392b (red). If none found, write a single line: "✅ No flagged content detected."
   Do not soften, omit, or euphemise findings — be direct and factual.
 - Keep the tone neutral and factual for all other sections.
