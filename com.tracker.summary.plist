@@ -26,32 +26,8 @@
     <key>ThrottleInterval</key>
     <integer>10</integer>
 
-    <!-- Schedule + API keys (filled in by install.sh) -->
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>OPENAI_API_KEY</key>
-        <string>__OPENAI_API_KEY__</string>
-        <key>MAILERSEND_API_KEY</key>
-        <string>__MAILERSEND_API_KEY__</string>
-        <key>MAILERSEND_FROM</key>
-        <string>__MAILERSEND_FROM__</string>
-        <key>MAILERSEND_TO</key>
-        <string>__MAILERSEND_TO__</string>
-        <key>OPENAI_MODEL</key>
-        <string>__OPENAI_MODEL__</string>
-        <key>SUMMARY_SCHEDULE</key>
-        <string>__SUMMARY_SCHEDULE__</string>
-        <key>SUMMARY_SCHEDULE_HOUR</key>
-        <string>__SUMMARY_SCHEDULE_HOUR__</string>
-        <key>SUMMARY_SCHEDULE_MINUTE</key>
-        <string>__SUMMARY_SCHEDULE_MINUTE__</string>
-        <key>SUMMARY_SCHEDULE_WEEKDAY</key>
-        <string>__SUMMARY_SCHEDULE_WEEKDAY__</string>
-        <key>SUMMARY_SCHEDULE_DAY</key>
-        <string>__SUMMARY_SCHEDULE_DAY__</string>
-        <key>SUMMARY_SCHEDULE_INTERVAL_MINUTES</key>
-        <string>__SUMMARY_SCHEDULE_INTERVAL_MINUTES__</string>
-    </dict>
+    <!-- API keys and schedule are loaded at runtime from .env via python-dotenv. -->
+    <!-- They are NOT embedded here to keep secrets out of ~/Library/LaunchAgents. -->
 
     <!-- Python writes rotating logs internally; only capture stderr from launchd -->
     <key>StandardOutPath</key>

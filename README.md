@@ -32,7 +32,7 @@ The person being monitored installs the tracker on their own machine with full k
 - 🛡️ **Tamper detection** — a SHA-256 checksum sidecar file is updated on every log write; the summariser alerts if the log has been modified between writes
 - 👁️ **Watchdog** — the summariser checks every 5 minutes that the tracker service is still running, and sends an immediate alert if it has been stopped
 - 🔐 **Privacy-preserving AI** — only domain names (not full URLs or paths) are sent to OpenAI; complete URLs remain on the local machine only
-- 🔒 **Secrets via env vars** — no credentials ever hardcoded; all keys live in a `.env` file
+- **Secrets via env vars** — no credentials ever hardcoded; all keys live in `.env` and are loaded at runtime by the Python services. API keys are **not** embedded in the launchd plist files in `~/Library/LaunchAgents/`.
 
 ---
 
@@ -62,24 +62,15 @@ Complete **all** of the following before running `install.sh`.
 
 | macOS Version | Status | Notes |
 |---|---|---|
-| 15 Sequoia (2024) | ⚠️ Use with caution | `launchctl load/unload` deprecated; see note below |
-| 14 Sonoma (2023) | ⚠️ Use with caution | `launchctl load/unload` deprecated; see note below |
-| 13 Ventura (2022) | ⚠️ Use with caution | `launchctl load/unload` deprecated; see note below |
+| 15 Sequoia (2024) | ✅ Fully supported | Uses `launchctl bootstrap/bootout` |
+| 14 Sonoma (2023) | ✅ Fully supported | Uses `launchctl bootstrap/bootout` |
+| 13 Ventura (2022) | ✅ Fully supported | Uses `launchctl bootstrap/bootout` |
 | 12 Monterey (2021) | ✅ Fully supported | |
 | 11 Big Sur (2020) | ✅ Fully supported | |
 | 10.15 Catalina (2019) | ✅ Minimum supported | |
 | 10.14 Mojave or earlier | ❌ Not supported | Automation privacy permissions not enforced; AppleScript behaviour differs |
 
-> **Ventura / Sonoma / Sequoia note:** Apple deprecated `launchctl load` and `launchctl unload` in macOS 13+. The install and uninstall scripts use these legacy commands, which may fail silently on newer systems. If services don't start after installation, run the following manually:
-> ```bash
-> # Load (replace with your username UID from: id -u)
-> launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.tracker.web.plist
-> launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.tracker.summary.plist
->
-> # Unload
-> launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.tracker.web.plist
-> launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.tracker.summary.plist
-> ```
+The `install.sh` script automatically uses the correct launchctl commands for your macOS version (`bootstrap`/`bootout` on macOS 13+, `load`/`unload` on older versions). No manual commands needed.
 
 ### 2. Python 3.8+
 
@@ -119,6 +110,8 @@ On **macOS 10.15–12 Monterey** (System Preferences):
 4. Note the verified sender email address you will use as `MAILERSEND_FROM`
 
 ### 6. Configure `.env`
+
+The `install.sh` wizard will prompt for all required values and write `.env` for you. If you prefer to configure it manually:
 
 ```bash
 cp .env.template .env
@@ -171,13 +164,24 @@ SUMMARY_SCHEDULE_HOUR=9
 bash install.sh
 ```
 
-This will:
-1. Check prerequisites (macOS, Python version, pip, required files, internet)
-2. Validate your `.env`
-3. Install Python dependencies (`pip install -r requirements.txt`)
-4. Copy and configure both launchd services into `~/Library/LaunchAgents/`
-5. Load and start both services immediately
-6. Send a confirmation email with your configuration summary
+The installer will:
+1. Check prerequisites (macOS, Python 3.8+, pip, required files)
+2. **Prompt for any missing API keys** — no manual `.env` editing needed
+3. **Validate your credentials** against the OpenAI and MailerSend APIs before proceeding
+4. **Remind you to grant macOS permissions** and offer to open System Settings directly
+5. Install Python dependencies (`pip install -r requirements.txt`)
+6. Install and start both launchd services (using the correct commands for your macOS version)
+7. Send a confirmation email with your configuration summary
+
+> **Already installed?** Re-run `bash install.sh` any time to update credentials or re-register services after moving the project directory.
+
+### Check service health
+
+```bash
+bash install.sh --status
+```
+
+Shows whether each service is running, and tails the last few lines of each log file.
 
 ---
 
@@ -224,4 +228,4 @@ You will be prompted whether to also delete log files and your `.env`.
 | Scheduling | [APScheduler](https://apscheduler.readthedocs.io/) | — |
 | AI summarisation | [OpenAI Python SDK](https://github.com/openai/openai-python) | — |
 | Email delivery | [MailerSend REST API](https://developers.mailersend.com/) | — |
-| macOS daemon | launchd (`~/Library/LaunchAgents/`) | 10.15 Catalina+ (`load/unload` deprecated on 13+) |
+| macOS daemon | launchd (`~/Library/LaunchAgents/`) | 10.15 Catalina+ (`bootstrap`/`bootout` on 13+, `load`/`unload` on older) |

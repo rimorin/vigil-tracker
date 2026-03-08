@@ -1,9 +1,12 @@
 import os
+from pathlib import Path
 from typing import List
 from dotenv import load_dotenv
 
-# Load .env if present (useful for local dev; launchd passes vars directly)
-load_dotenv()
+# Load .env from the project directory (same folder as this file).
+# This works both in local dev and when run as a launchd service, regardless
+# of the current working directory.
+load_dotenv(Path(__file__).parent / ".env")
 
 def _require(name: str) -> str:
     value = os.environ.get(name)
