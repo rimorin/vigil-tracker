@@ -49,7 +49,11 @@ personal_tracker/
 ├── install.sh                          # One-command install script
 ├── uninstall.sh                        # One-command uninstall script
 ├── .env.template                       # Configuration template (copy to .env)
-└── detailed_activity_log.txt.sha256    # Tamper-detection checksum (auto-generated)
+├── detailed_activity_log.txt.sha256    # Tamper-detection checksum (auto-generated)
+└── tests/
+    ├── conftest.py                     # Shared pytest fixtures and env stubs
+    ├── test_tracker.py                 # Tests for tracker.py logic
+    └── test_summarizer.py              # Tests for summarizer.py logic
 ```
 
 ---
@@ -230,7 +234,42 @@ You will be prompted whether to also delete log files and your `.env`.
 
 ---
 
-## 🧰 Tech Stack
+## 🧪 Testing
+
+The test suite covers all pure-logic functions in `tracker.py` and `summarizer.py`. No real log files, SMTP servers, or OpenAI API calls are made — all file I/O is redirected to temporary directories via pytest fixtures.
+
+### Run the tests
+
+```bash
+.venv/bin/pytest tests/ -v
+```
+
+### What is tested
+
+| File | Test class | What it covers |
+|---|---|---|
+| `tracker.py` | `TestUpdateIntegrityHash` | SHA-256 sidecar written correctly; no-op when log is absent |
+| `tracker.py` | `TestLogDurationEntry` | Entry format, timestamp pattern, hash updated on write |
+| `tracker.py` | `TestFinalizeSession` | Basic duration, idle gap excluded, open idle counted, short sessions discarded |
+| `tracker.py` | `TestGetLastLogTime` | Parses last-line timestamp; handles empty file, missing file, unparseable line |
+| `tracker.py` | `TestCheckForShutdownEvent` | Logs shutdown event when boot time is after last activity; no-op otherwise |
+| `tracker.py` | `TestGetActiveTabAppleScript` | Script contains Safari block and System Events block |
+| `summarizer.py` | `TestCleanupOldEntries` | Removes old entries, keeps recent ones, keeps undated lines (SYSTEM EVENT), no-op for zero-day retention, atomic write, hash refresh, no temp file left behind |
+| `summarizer.py` | `TestStripToDomain` | Full URLs stripped to domain; timestamps and durations preserved |
+| `summarizer.py` | `TestParseDurationEntries` | Accumulates time per domain; ignores undated lines |
+| `summarizer.py` | `TestFormatDuration` | Seconds → `30s`, `1m`, `1h`, `1h 1m` (parametrised) |
+| `summarizer.py` | `TestBuildTimePerDomainHtml` | Top-5 cap, empty input, total time displayed |
+| `summarizer.py` | `TestHtmlToText` | Tags stripped, excess whitespace collapsed |
+| `summarizer.py` | `TestSentinelFile` | Today/yesterday/missing sentinel; `_mark_sent_today` round-trip |
+| `summarizer.py` | `TestVerifyLogIntegrity` | Valid hash passes, tampered log fails, missing files treated as valid |
+
+### Adding tests
+
+`tests/conftest.py` stubs all required environment variables so `config.py` can be imported without a real `.env`. Use the `log_env` and `sentinel_env` fixtures (defined in `test_summarizer.py`) to redirect file paths to `tmp_path` and keep tests hermetic.
+
+---
+
+
 
 | Component | Library / Service | macOS requirement |
 |---|---|---|

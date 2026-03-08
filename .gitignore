@@ -28,5 +28,8 @@ build/
 venv/
 env/
 
+# pytest
+.pytest_cache/
+
 # macOS
 .DS_Store
