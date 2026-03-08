@@ -1,5 +1,5 @@
 openai>=1.0.0
-requests
 python-dotenv
 apscheduler>=3.10.0
 tzlocal
+pytest

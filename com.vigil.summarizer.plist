@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.vigil.summarizer</string>
+
+    <key>ServiceDescription</key>
+    <string>Vigil Summarizer</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON_PATH__</string>
+        <string>__PROJECT_DIR__/summarizer.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__PROJECT_DIR__</string>
+
+    <!-- Start on login and keep alive — APScheduler handles the schedule internally -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- API keys and schedule are loaded at runtime from .env via python-dotenv. -->
+    <!-- They are NOT embedded here to keep secrets out of ~/Library/LaunchAgents. -->
+
+    <!-- Python writes rotating logs internally; only capture stderr from launchd -->
+    <key>StandardOutPath</key>
+    <string>/dev/null</string>
+    <key>StandardErrorPath</key>
+    <string>__PROJECT_DIR__/summarizer_stderr.log</string>
+</dict>
+</plist>

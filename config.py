@@ -1,26 +1,36 @@
 import os
+from pathlib import Path
 from typing import List
 from dotenv import load_dotenv
 
-# Load .env if present (useful for local dev; launchd passes vars directly)
-load_dotenv()
+# Load .env from the project directory (same folder as this file).
+# This works both in local dev and when run as a launchd service, regardless
+# of the current working directory.
+load_dotenv(Path(__file__).parent / ".env")
 
 def _require(name: str) -> str:
     value = os.environ.get(name)
     if not value:
         raise EnvironmentError(
             f"Required environment variable '{name}' is not set. "
-            f"Add it to your .env file or launchd plist EnvironmentVariables."
+            f"Add it to your .env file or re-run install.sh."
         )
     return value
 
 OPENAI_API_KEY: str = _require("OPENAI_API_KEY")
-MAILERSEND_API_KEY: str = _require("MAILERSEND_API_KEY")
-MAILERSEND_FROM: str = _require("MAILERSEND_FROM")   # e.g. "tracker@yourdomain.com"
-# Comma-separated list of recipient addresses, e.g. "a@example.com,b@example.com"
-MAILERSEND_TO: List[str] = [e.strip() for e in _require("MAILERSEND_TO").split(",") if e.strip()]
-
 OPENAI_MODEL: str = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+
+# ---------------------------------------------------------------------------
+# SMTP email configuration
+# ---------------------------------------------------------------------------
+SMTP_HOST: str = _require("SMTP_HOST")
+SMTP_PORT: int = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USER: str = _require("SMTP_USER")
+SMTP_PASS: str = _require("SMTP_PASS")
+# Sender address — defaults to SMTP_USER if not explicitly set
+SMTP_FROM: str = os.environ.get("SMTP_FROM", "") or _require("SMTP_USER")
+# Comma-separated list of recipient addresses
+SMTP_TO: List[str] = [e.strip() for e in _require("SMTP_TO").split(",") if e.strip()]
 
 # ---------------------------------------------------------------------------
 # Schedule configuration
@@ -47,3 +57,10 @@ if SUMMARY_SCHEDULE not in _VALID_SCHEDULES:
 
 # Number of minutes between digests — used when SUMMARY_SCHEDULE=interval
 SUMMARY_SCHEDULE_INTERVAL_MINUTES: int = int(os.environ.get("SUMMARY_SCHEDULE_INTERVAL_MINUTES", "60"))
+
+# ---------------------------------------------------------------------------
+# Log retention
+# ---------------------------------------------------------------------------
+# Activity log entries older than this many days are pruned by the daily
+# cleanup job in the summarizer daemon.
+LOG_RETENTION_DAYS: int = int(os.environ.get("LOG_RETENTION_DAYS", "30"))

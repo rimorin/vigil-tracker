@@ -4,10 +4,10 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.tracker.web</string>
+    <string>com.vigil.tracker</string>
 
     <key>ServiceDescription</key>
-    <string>Web Activity Tracker</string>
+    <string>Vigil</string>
 
     <key>ProgramArguments</key>
     <array>
@@ -28,20 +28,8 @@
     <key>ThrottleInterval</key>
     <integer>10</integer>
 
-    <!-- API keys and settings (filled in by install.sh) -->
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>OPENAI_API_KEY</key>
-        <string>__OPENAI_API_KEY__</string>
-        <key>MAILERSEND_API_KEY</key>
-        <string>__MAILERSEND_API_KEY__</string>
-        <key>MAILERSEND_FROM</key>
-        <string>__MAILERSEND_FROM__</string>
-        <key>MAILERSEND_TO</key>
-        <string>__MAILERSEND_TO__</string>
-        <key>OPENAI_MODEL</key>
-        <string>__OPENAI_MODEL__</string>
-    </dict>
+    <!-- API keys and schedule are loaded at runtime from .env via python-dotenv. -->
+    <!-- They are NOT embedded here to keep secrets out of ~/Library/LaunchAgents. -->
 
     <!-- Python writes rotating logs internally; only capture stderr from launchd -->
     <key>StandardOutPath</key>

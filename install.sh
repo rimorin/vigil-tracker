@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# install.sh — installs the Web Activity Tracker as macOS launchd services.
-# Run once after setting up your .env file.
+# install.sh — installs Vigil as macOS launchd services.
+#
+# Usage:
+#   bash install.sh              — guided install (wizard prompts for any missing .env values)
+#   bash install.sh --status     — show service health and recent log output
+#   bash install.sh --reinstall  — re-fill plists and reload services (use after moving the project)
 
 set -euo pipefail
 
@@ -10,17 +14,103 @@ ENV_FILE="$SCRIPT_DIR/.env"
 ENV_TEMPLATE="$SCRIPT_DIR/.env.template"
 
 # ── Colours ────────────────────────────────────────────────────────────────
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
-info()    { echo -e "${GREEN}[install]${NC} $*"; }
-warn()    { echo -e "${YELLOW}[install]${NC} $*"; }
-error()   { echo -e "${RED}[install]${NC} $*" >&2; exit 1; }
+info()  { echo -e "${GREEN}[install]${NC} $*"; }
+warn()  { echo -e "${YELLOW}[install]${NC} $*"; }
+error() { echo -e "${RED}[install]${NC} $*" >&2; exit 1; }
+step()  { echo -e "\n${BOLD}${CYAN}▶  $*${NC}"; }
 
-# ── Prerequisites ─────────────────────────────────────────────────────────
-info "Checking prerequisites..."
-
-# macOS only — this installer relies on launchd which is macOS-specific
+# ── macOS check ────────────────────────────────────────────────────────────
 [[ "$(uname -s)" != "Darwin" ]] && error "This installer only supports macOS."
+
+# Detect macOS major version for launchctl compatibility
+MACOS_MAJOR=$(sw_vers -productVersion | cut -d. -f1)
+USER_UID=$(id -u)
+
+# ── launchctl helpers (bootstrap/bootout on macOS 13+, load/unload on older) ─
+launchctl_load() {
+    local plist="$1"
+    if (( MACOS_MAJOR >= 13 )); then
+        launchctl bootstrap "gui/${USER_UID}" "$plist"
+    else
+        launchctl load "$plist"
+    fi
+}
+
+launchctl_unload() {
+    local plist="$1"
+    if (( MACOS_MAJOR >= 13 )); then
+        launchctl bootout "gui/${USER_UID}" "$plist" 2>/dev/null || true
+    else
+        launchctl unload "$plist" 2>/dev/null || true
+    fi
+}
+
+launchctl_service_status() {
+    local label="$1"
+    if (( MACOS_MAJOR >= 13 )); then
+        local state
+        state=$(launchctl print "gui/${USER_UID}/${label}" 2>/dev/null \
+            | grep -E "^\s+state\s*=" | awk '{print $3}') || true
+        [[ -n "$state" ]] && echo "$state" || echo "not loaded"
+    else
+        local pid exit_code
+        pid=$(launchctl list "$label" 2>/dev/null \
+            | grep '"PID"' | awk -F'= ' '{gsub(/[";]/,"",$2); print $2}') || true
+        exit_code=$(launchctl list "$label" 2>/dev/null \
+            | grep '"LastExitStatus"' | awk -F'= ' '{gsub(/[";]/,"",$2); print $2}') || true
+        if [[ -n "$pid" ]]; then
+            echo "running (PID $pid)"
+        elif launchctl list 2>/dev/null | grep -q "$label"; then
+            echo "stopped (last exit: ${exit_code:-unknown})"
+        else
+            echo "not loaded"
+        fi
+    fi
+}
+
+# ── --status flag ──────────────────────────────────────────────────────────
+if [[ "${1:-}" == "--status" ]]; then
+    echo ""
+    echo -e "${BOLD}${GREEN}━━━━  Vigil — Status  ━━━━${NC}"
+    echo ""
+    for label in com.vigil.tracker com.vigil.summarizer; do
+        svc_status=$(launchctl_service_status "$label")
+        echo -e "  ${BOLD}${label}${NC}: ${svc_status}"
+    done
+    echo ""
+    for log in tracker_daemon.log summarizer_daemon.log; do
+        log_path="$SCRIPT_DIR/$log"
+        if [[ -f "$log_path" ]]; then
+            echo -e "${CYAN}── ${log} (last 5 lines) ──${NC}"
+            tail -5 "$log_path"
+            echo ""
+        fi
+    done
+    for log in tracker_stderr.log summarizer_stderr.log; do
+        log_path="$SCRIPT_DIR/$log"
+        if [[ -f "$log_path" ]] && [[ -s "$log_path" ]]; then
+            echo -e "${YELLOW}── ${log} (last 5 lines) ──${NC}"
+            tail -5 "$log_path"
+            echo ""
+        fi
+    done
+    exit 0
+fi
+
+# ── --reinstall flag ───────────────────────────────────────────────────────
+# Skips the setup wizard, credential checks, and permission prompt.
+# Use after moving the project directory or to pick up code changes.
+REINSTALL=false
+if [[ "${1:-}" == "--reinstall" ]]; then
+    REINSTALL=true
+    info "Reinstall mode — skipping wizard and credential checks."
+fi
+
+# ── Prerequisites ──────────────────────────────────────────────────────────
+step "Checking prerequisites..."
 
 # python3 — resolve the real binary so launchd can find it without PATH shims
 if command -v pyenv &>/dev/null; then
@@ -39,45 +129,182 @@ if (( PY_MAJOR < 3 || (PY_MAJOR == 3 && PY_MINOR < 8) )); then
 fi
 info "Python $PY_VERSION ✓"
 
-# pip
 "$PYTHON_PATH" -m pip --version &>/dev/null \
     || error "pip not available for $PYTHON_PATH. Try: $PYTHON_PATH -m ensurepip --upgrade"
 info "pip ✓"
 
-# Required project files
-for f in requirements.txt com.tracker.web.plist com.tracker.summary.plist; do
+for f in requirements.txt com.vigil.tracker.plist com.vigil.summarizer.plist; do
     [[ ! -f "$SCRIPT_DIR/$f" ]] && error "Required file not found: $f"
 done
-info "Project files ✓"
+info "Project files ✓  (macOS $(sw_vers -productVersion))"
 
-# Internet connectivity (non-fatal — services may still work later)
-if ! curl -sf --max-time 5 https://api.mailersend.com >/dev/null 2>&1; then
-    warn "Could not reach api.mailersend.com — check your internet connection."
-fi
-
-# ── Generate .env.template if it doesn't exist ─────────────────────────────
+# ── Ensure .env.template exists ────────────────────────────────────────────
 if [[ ! -f "$ENV_TEMPLATE" ]]; then
     cat > "$ENV_TEMPLATE" <<'EOF'
-# Web Activity Tracker — environment variables
-# Copy this file to .env and fill in your values.
+# Vigil — environment variables
+# Run bash install.sh and the wizard will fill this in for you,
+# or copy to .env and edit manually.
 
 OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-4o-mini
 
-MAILERSEND_API_KEY=mlsn....
-MAILERSEND_FROM=tracker@yourdomain.com
-MAILERSEND_TO=you@example.com
+# SMTP email settings — works with Gmail, Outlook, Fastmail, or any SMTP provider
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=you@gmail.com
+SMTP_PASS=your-app-password
+# SMTP_FROM defaults to SMTP_USER if not set
+# SMTP_FROM=you@gmail.com
+SMTP_TO=you@example.com
 
-# Hour of day (0-23) to send the daily digest email. Default: 21 (9 PM).
+# Schedule: hourly | daily | weekly | monthly | interval
+SUMMARY_SCHEDULE=daily
 SUMMARY_SCHEDULE_HOUR=21
+SUMMARY_SCHEDULE_MINUTE=0
+SUMMARY_SCHEDULE_WEEKDAY=mon
+SUMMARY_SCHEDULE_DAY=1
+SUMMARY_SCHEDULE_INTERVAL_MINUTES=60
 EOF
-    info "Created .env.template — copy it to .env and fill in your keys."
 fi
 
-# ── Require .env ───────────────────────────────────────────────────────────
-if [[ ! -f "$ENV_FILE" ]]; then
-    error ".env not found. Copy .env.template to .env and fill in your API keys, then re-run install.sh."
+# ── Setup wizard — create / complete .env ─────────────────────────────────
+if [[ "$REINSTALL" == false ]]; then
+
+step "Checking configuration..."
+
+# Read a value from .env (returns empty string if key is absent or a placeholder)
+read_env_value() {
+    local key="$1" val
+    val=$(grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r')
+    [[ "$val" == sk-... || "$val" == your-app-password || "$val" =~ example\.com || "$val" =~ gmail\.com$ ]] && val=""
+    echo "$val"
+}
+
+# Write or update a key=value pair in .env
+write_env_value() {
+    local key="$1" val="$2"
+    if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
+        "$PYTHON_PATH" - "$key" "$val" "$ENV_FILE" <<'PYEOF'
+import re, sys
+key, val, path = sys.argv[1], sys.argv[2], sys.argv[3]
+content = open(path).read()
+content = re.sub(r'^' + re.escape(key) + r'=.*$', key + '=' + val, content, flags=re.MULTILINE)
+open(path, 'w').write(content)
+PYEOF
+    else
+        echo "${key}=${val}" >> "$ENV_FILE"
+    fi
+}
+
+# Create .env from template if missing
+[[ ! -f "$ENV_FILE" ]] && cp "$ENV_TEMPLATE" "$ENV_FILE"
+
+REQUIRED_VARS=(OPENAI_API_KEY SMTP_HOST SMTP_USER SMTP_PASS SMTP_TO)
+MISSING_VARS=()
+for var in "${REQUIRED_VARS[@]}"; do
+    val=$(read_env_value "$var")
+    [[ -z "$val" ]] && MISSING_VARS+=("$var")
+done
+
+if [[ ${#MISSING_VARS[@]} -gt 0 ]]; then
+    echo ""
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}  📝  Setup wizard — enter your API keys${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo "  The following values are missing from .env."
+    echo "  Enter them now, or press Ctrl-C to edit .env manually."
+    echo ""
+    for var in "${MISSING_VARS[@]}"; do
+        case "$var" in
+            OPENAI_API_KEY)
+                echo -e "  ${CYAN}OpenAI API key${NC}"
+                echo "  → https://platform.openai.com/api-keys"
+                ;;
+            SMTP_HOST)
+                echo -e "  ${CYAN}SMTP server hostname${NC}"
+                echo "  Gmail: smtp.gmail.com  |  Outlook: smtp.office365.com  |  Fastmail: smtp.fastmail.com"
+                ;;
+            SMTP_USER)
+                echo -e "  ${CYAN}SMTP username${NC} (usually your full email address)"
+                ;;
+            SMTP_PASS)
+                echo -e "  ${CYAN}SMTP password / app password${NC}"
+                echo "  Gmail users: create an App Password at https://myaccount.google.com/apppasswords"
+                ;;
+            SMTP_TO)
+                echo -e "  ${CYAN}Recipient email address(es)${NC}"
+                echo "  Comma-separate to add an accountability partner, e.g. you@example.com,partner@example.com"
+                ;;
+        esac
+        while true; do
+            read -r -p "  ${var}: " entered_val
+            [[ -n "$entered_val" ]] && break
+            echo -e "  ${RED}Value cannot be empty.${NC}"
+        done
+        write_env_value "$var" "$entered_val"
+        info "Saved ${var} ✓"
+        echo ""
+    done
 fi
+
+# ── Schedule wizard ────────────────────────────────────────────────────────
+CURRENT_SCHEDULE=$(read_env_value "SUMMARY_SCHEDULE")
+if [[ -z "$CURRENT_SCHEDULE" ]]; then
+    echo ""
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}  🕐  Digest schedule${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo "  How often would you like to receive your browsing digest?"
+    echo ""
+    echo "  1) daily    — once a day at a chosen time  (recommended)"
+    echo "  2) hourly   — every hour"
+    echo "  3) weekly   — once a week on a chosen day"
+    echo "  4) monthly  — once a month on a chosen day"
+    echo ""
+    while true; do
+        read -r -p "  Choice [1-4, default 1]: " sched_choice
+        sched_choice="${sched_choice:-1}"
+        case "$sched_choice" in 1|2|3|4) break ;; esac
+        echo -e "  ${RED}Enter 1, 2, 3, or 4.${NC}"
+    done
+
+    case "$sched_choice" in
+        1)
+            write_env_value "SUMMARY_SCHEDULE" "daily"
+            read -r -p "  Hour to send (0-23, default 21): " sched_hour
+            write_env_value "SUMMARY_SCHEDULE_HOUR" "${sched_hour:-21}"
+            info "Schedule: daily at ${sched_hour:-21}:00 ✓"
+            ;;
+        2)
+            write_env_value "SUMMARY_SCHEDULE" "hourly"
+            read -r -p "  Minute past the hour to send (0-59, default 0): " sched_min
+            write_env_value "SUMMARY_SCHEDULE_MINUTE" "${sched_min:-0}"
+            info "Schedule: hourly at :${sched_min:-00} ✓"
+            ;;
+        3)
+            write_env_value "SUMMARY_SCHEDULE" "weekly"
+            echo "  Day of week: mon tue wed thu fri sat sun"
+            read -r -p "  Day (default mon): " sched_day
+            write_env_value "SUMMARY_SCHEDULE_WEEKDAY" "${sched_day:-mon}"
+            read -r -p "  Hour to send (0-23, default 9): " sched_hour
+            write_env_value "SUMMARY_SCHEDULE_HOUR" "${sched_hour:-9}"
+            info "Schedule: weekly on ${sched_day:-mon} at ${sched_hour:-9}:00 ✓"
+            ;;
+        4)
+            write_env_value "SUMMARY_SCHEDULE" "monthly"
+            read -r -p "  Day of month (1-28, default 1): " sched_dom
+            write_env_value "SUMMARY_SCHEDULE_DAY" "${sched_dom:-1}"
+            read -r -p "  Hour to send (0-23, default 9): " sched_hour
+            write_env_value "SUMMARY_SCHEDULE_HOUR" "${sched_hour:-9}"
+            info "Schedule: monthly on day ${sched_dom:-1} at ${sched_hour:-9}:00 ✓"
+            ;;
+    esac
+    echo ""
+fi
+
+fi # end REINSTALL=false wizard block
 
 # ── Load .env ──────────────────────────────────────────────────────────────
 set -a
@@ -86,7 +313,7 @@ source "$ENV_FILE"
 set +a
 
 # ── Validate required vars ─────────────────────────────────────────────────
-for var in OPENAI_API_KEY MAILERSEND_API_KEY MAILERSEND_FROM MAILERSEND_TO; do
+for var in "${REQUIRED_VARS[@]}"; do
     [[ -z "${!var:-}" ]] && error "Required variable '$var' is not set in .env."
 done
 
@@ -99,52 +326,115 @@ SUMMARY_SCHEDULE_DAY="${SUMMARY_SCHEDULE_DAY:-1}"
 SUMMARY_SCHEDULE_INTERVAL_MINUTES="${SUMMARY_SCHEDULE_INTERVAL_MINUTES:-60}"
 OPENAI_MODEL="${OPENAI_MODEL:-gpt-4o-mini}"
 
-# Validate schedule type
 case "$SUMMARY_SCHEDULE" in
     hourly|daily|weekly|monthly|interval) ;;
     *) error "SUMMARY_SCHEDULE must be one of: hourly, daily, weekly, monthly, interval. Got: $SUMMARY_SCHEDULE" ;;
 esac
 
-# ── Install Python dependencies ────────────────────────────────────────────
-info "Using Python: $PYTHON_PATH"
-info "Installing Python dependencies..."
-"$PYTHON_PATH" -m pip install -q -r "$SCRIPT_DIR/requirements.txt"
+# ── Pre-flight credential validation ──────────────────────────────────────
+if [[ "$REINSTALL" == false ]]; then
+step "Validating API credentials..."
 
-# ── Helper: fill placeholders in a plist template ─────────────────────────
-# Uses Python str.replace() via environment variables — immune to special
-# characters in API keys (slashes, ampersands, etc. that break sed).
+OPENAI_HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
+    -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+    "https://api.openai.com/v1/models" 2>/dev/null || echo "000")
+# 200 = valid; 403 = valid key but account/project restricted on this endpoint;
+# 429 = valid key, rate limited — all mean the key itself is accepted.
+if [[ "$OPENAI_HTTP" == "200" || "$OPENAI_HTTP" == "403" || "$OPENAI_HTTP" == "429" ]]; then
+    info "OpenAI API key valid ✓"
+elif [[ "$OPENAI_HTTP" == "401" ]]; then
+    error "OpenAI API key is invalid (HTTP 401). Update OPENAI_API_KEY in .env and re-run."
+else
+    warn "Could not verify OpenAI API key (HTTP ${OPENAI_HTTP}) — check your internet connection."
+fi
+
+# Test SMTP credentials by connecting and authenticating (no email sent)
+SMTP_TEST=$("$PYTHON_PATH" - \
+    "${SMTP_HOST}" "${SMTP_PORT:-587}" "${SMTP_USER}" "${SMTP_PASS}" <<'PYEOF' 2>&1 || true
+import smtplib, ssl, sys
+host, port, user, pw = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+try:
+    if port == 465:
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP_SSL(host, port, context=ctx, timeout=10) as s:
+            s.login(user, pw)
+    else:
+        with smtplib.SMTP(host, port, timeout=10) as s:
+            s.ehlo(); s.starttls(); s.ehlo(); s.login(user, pw)
+    print("ok")
+except smtplib.SMTPAuthenticationError:
+    print("auth_failed"); sys.exit(1)
+except Exception as e:
+    print(f"error: {e}"); sys.exit(2)
+PYEOF
+)
+if [[ "$SMTP_TEST" == "ok" ]]; then
+    info "SMTP credentials valid ✓"
+elif [[ "$SMTP_TEST" == "auth_failed" ]]; then
+    error "SMTP authentication failed. Check SMTP_USER and SMTP_PASS in .env."
+else
+    warn "Could not verify SMTP credentials: ${SMTP_TEST} — check your internet connection."
+fi
+
+# ── macOS permission reminder ──────────────────────────────────────────────
+# Only show this if Accessibility permission hasn't been granted yet.
+# A successful osascript call to System Events confirms the permission is in place.
+if ! osascript -e 'tell application "System Events" to return count of processes' &>/dev/null; then
+    echo ""
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}  ⚙️   macOS permissions required (one-time setup)${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    if (( MACOS_MAJOR >= 13 )); then
+        echo "  System Settings → Privacy & Security"
+    else
+        echo "  System Preferences → Security & Privacy → Privacy"
+    fi
+    echo "    • Accessibility  → add Terminal (or your terminal app)"
+    echo "    • Automation     → allow Terminal to control Safari, Chrome, etc."
+    echo ""
+    echo -e "  Press ${BOLD}Enter${NC} to open System Settings now, or type ${BOLD}s${NC} to skip."
+    read -r -p "  > " PERM_CHOICE
+    if [[ "${PERM_CHOICE,,}" != "s" ]]; then
+        open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility" 2>/dev/null || true
+        echo ""
+        read -r -p "  Press Enter once you have granted permissions to continue..."
+    fi
+else
+    info "macOS permissions already granted ✓"
+fi
+
+fi # end REINSTALL=false validation block
+
+# ── Set up project-local virtual environment ──────────────────────────────
+step "Setting up Python environment..."
+VENV_DIR="$SCRIPT_DIR/.venv"
+if [[ ! -d "$VENV_DIR" ]]; then
+    "$PYTHON_PATH" -m venv "$VENV_DIR"
+    info "Created virtual environment at .venv ✓"
+else
+    info "Virtual environment already exists ✓"
+fi
+# Use the venv Python for everything from here on (services, fill_plist, email)
+PYTHON_PATH="$VENV_DIR/bin/python3"
+"$PYTHON_PATH" -m pip install -q --upgrade pip
+"$PYTHON_PATH" -m pip install -q -r "$SCRIPT_DIR/requirements.txt"
+info "Dependencies installed ✓"
+
+# ── Helper: fill plist templates ───────────────────────────────────────────
+# Only PYTHON_PATH and PROJECT_DIR are embedded in the plist.
+# All secrets (API keys, schedule) remain in .env and are loaded at runtime
+# by config.py via python-dotenv — they never touch the LaunchAgents directory.
 fill_plist() {
     local src="$1" dst="$2"
     _PLIST_PYTHON_PATH="$PYTHON_PATH" \
     _PLIST_PROJECT_DIR="$SCRIPT_DIR" \
-    _PLIST_OPENAI_API_KEY="$OPENAI_API_KEY" \
-    _PLIST_MAILERSEND_API_KEY="$MAILERSEND_API_KEY" \
-    _PLIST_MAILERSEND_FROM="$MAILERSEND_FROM" \
-    _PLIST_MAILERSEND_TO="$MAILERSEND_TO" \
-    _PLIST_SUMMARY_SCHEDULE="$SUMMARY_SCHEDULE" \
-    _PLIST_SUMMARY_SCHEDULE_HOUR="$SUMMARY_SCHEDULE_HOUR" \
-    _PLIST_SUMMARY_SCHEDULE_MINUTE="$SUMMARY_SCHEDULE_MINUTE" \
-    _PLIST_SUMMARY_SCHEDULE_WEEKDAY="$SUMMARY_SCHEDULE_WEEKDAY" \
-    _PLIST_SUMMARY_SCHEDULE_DAY="$SUMMARY_SCHEDULE_DAY" \
-    _PLIST_SUMMARY_SCHEDULE_INTERVAL_MINUTES="$SUMMARY_SCHEDULE_INTERVAL_MINUTES" \
-    _PLIST_OPENAI_MODEL="$OPENAI_MODEL" \
     "$PYTHON_PATH" - "$src" "$dst" <<'PYEOF'
 import os, sys
 content = open(sys.argv[1]).read()
 for placeholder, env_var in [
-    ("__PYTHON_PATH__",                     "_PLIST_PYTHON_PATH"),
-    ("__PROJECT_DIR__",                     "_PLIST_PROJECT_DIR"),
-    ("__OPENAI_API_KEY__",                  "_PLIST_OPENAI_API_KEY"),
-    ("__MAILERSEND_API_KEY__",              "_PLIST_MAILERSEND_API_KEY"),
-    ("__MAILERSEND_FROM__",                 "_PLIST_MAILERSEND_FROM"),
-    ("__MAILERSEND_TO__",                   "_PLIST_MAILERSEND_TO"),
-    ("__SUMMARY_SCHEDULE__",               "_PLIST_SUMMARY_SCHEDULE"),
-    ("__SUMMARY_SCHEDULE_HOUR__",           "_PLIST_SUMMARY_SCHEDULE_HOUR"),
-    ("__SUMMARY_SCHEDULE_MINUTE__",         "_PLIST_SUMMARY_SCHEDULE_MINUTE"),
-    ("__SUMMARY_SCHEDULE_WEEKDAY__",        "_PLIST_SUMMARY_SCHEDULE_WEEKDAY"),
-    ("__SUMMARY_SCHEDULE_DAY__",            "_PLIST_SUMMARY_SCHEDULE_DAY"),
-    ("__SUMMARY_SCHEDULE_INTERVAL_MINUTES__", "_PLIST_SUMMARY_SCHEDULE_INTERVAL_MINUTES"),
-    ("__OPENAI_MODEL__",                    "_PLIST_OPENAI_MODEL"),
+    ("__PYTHON_PATH__", "_PLIST_PYTHON_PATH"),
+    ("__PROJECT_DIR__", "_PLIST_PROJECT_DIR"),
 ]:
     content = content.replace(placeholder, os.environ[env_var])
 open(sys.argv[2], "w").write(content)
@@ -153,31 +443,28 @@ PYEOF
 
 mkdir -p "$LAUNCH_AGENTS_DIR"
 
-# ── Install tracker plist ──────────────────────────────────────────────────
-WEB_PLIST_SRC="$SCRIPT_DIR/com.tracker.web.plist"
-WEB_PLIST_DST="$LAUNCH_AGENTS_DIR/com.tracker.web.plist"
+# ── Install tracker service ────────────────────────────────────────────────
+step "Installing launchd services..."
 
-# Unload existing service if loaded
-launchctl unload "$WEB_PLIST_DST" 2>/dev/null || true
-
+WEB_PLIST_SRC="$SCRIPT_DIR/com.vigil.tracker.plist"
+WEB_PLIST_DST="$LAUNCH_AGENTS_DIR/com.vigil.tracker.plist"
+launchctl_unload "$WEB_PLIST_DST"
 fill_plist "$WEB_PLIST_SRC" "$WEB_PLIST_DST"
-launchctl load "$WEB_PLIST_DST"
-info "Tracker service installed and started (com.tracker.web)."
+launchctl_load "$WEB_PLIST_DST"
+info "Tracker service installed and started (com.vigil.tracker) ✓"
 
-# ── Install summarizer plist ───────────────────────────────────────────────
-SUMMARY_PLIST_SRC="$SCRIPT_DIR/com.tracker.summary.plist"
-SUMMARY_PLIST_DST="$LAUNCH_AGENTS_DIR/com.tracker.summary.plist"
-
-launchctl unload "$SUMMARY_PLIST_DST" 2>/dev/null || true
-
+# ── Install summarizer service ─────────────────────────────────────────────
+SUMMARY_PLIST_SRC="$SCRIPT_DIR/com.vigil.summarizer.plist"
+SUMMARY_PLIST_DST="$LAUNCH_AGENTS_DIR/com.vigil.summarizer.plist"
+launchctl_unload "$SUMMARY_PLIST_DST"
 fill_plist "$SUMMARY_PLIST_SRC" "$SUMMARY_PLIST_DST"
-launchctl load "$SUMMARY_PLIST_DST"
-info "Summary service installed (com.tracker.summary) — schedule: ${SUMMARY_SCHEDULE}."
+launchctl_load "$SUMMARY_PLIST_DST"
+info "Summarizer service installed (com.vigil.summarizer) — schedule: ${SUMMARY_SCHEDULE} ✓"
 
 # ── Send confirmation email ────────────────────────────────────────────────
-info "Sending confirmation email to ${MAILERSEND_TO}..."
+step "Sending confirmation email..."
 if "$PYTHON_PATH" "$SCRIPT_DIR/summarizer.py" --confirm; then
-    info "Confirmation email sent."
+    info "Confirmation email sent to ${SMTP_TO} ✓"
 else
     warn "Confirmation email failed — check your MailerSend / OpenAI credentials."
     warn "The services are still running; this does not affect normal operation."
@@ -185,8 +472,13 @@ fi
 
 # ── Done ───────────────────────────────────────────────────────────────────
 echo ""
-echo -e "${GREEN}✅  Installation complete!${NC}"
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${GREEN}  ✅  Installation complete!${NC}"
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
-echo "  Tracker logs : $SCRIPT_DIR/tracker_daemon.log"
+echo "  Tracker logs    : $SCRIPT_DIR/tracker_daemon.log"
 echo "  Summarizer logs : $SCRIPT_DIR/summarizer_daemon.log"
-echo "  To uninstall : bash $SCRIPT_DIR/uninstall.sh"
+echo "  Check status    : bash $SCRIPT_DIR/install.sh --status"
+echo "  Reinstall       : bash $SCRIPT_DIR/install.sh --reinstall"
+echo "  To uninstall    : bash $SCRIPT_DIR/uninstall.sh"
+echo ""

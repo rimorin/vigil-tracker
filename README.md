@@ -1,8 +1,8 @@
-# Personal Web Activity Tracker
+# Vigil
 
 > **⚠️ macOS only** — this tool uses AppleScript, launchd, and macOS-specific APIs. It does not run on Windows or Linux.
 
-A macOS background service that monitors your daily web browsing across all major browsers, uses **OpenAI** to generate an intelligent summary, and emails the digest to you (and optionally an accountability partner) on a configurable schedule — hourly, daily, weekly, or monthly — via **MailerSend**.
+A macOS background service that monitors your daily web browsing across all major browsers, uses **OpenAI** to generate an intelligent summary, and emails the digest to you (and optionally an accountability partner) on a configurable schedule — hourly, daily, weekly, or monthly — via **SMTP** (works with Gmail, Outlook, Fastmail, or any mail provider).
 
 ---
 
@@ -26,13 +26,13 @@ The person being monitored installs the tracker on their own machine with full k
 
 - 🌐 **Multi-browser support** — tracks exact URLs from Safari, Chrome, Edge, Brave, Arc, Vivaldi (including private/incognito windows); falls back to window title for Firefox, Tor Browser, and Opera
 - 🤖 **AI-powered digest** — OpenAI (`gpt-4o-mini` by default) categorises your activity, surfaces top domains, highlights notable browsing sessions, and **explicitly flags** any adult, gambling, or self-harm content
-- 📧 **Email delivery** — sends a clean HTML email via MailerSend with Overview, Top Domains, Categories, Timeline Highlights, and Concern Flags sections
+- 📧 **Email delivery** — sends a clean HTML email via SMTP (no third-party service required) with Overview, Top Domains, Categories, Timeline Highlights, and Concern Flags sections
 - ⏰ **Flexible schedule** — `hourly`, `daily`, `weekly`, or `monthly` digest controlled entirely by environment variables (powered by APScheduler)
 - 🚀 **Runs as a macOS daemon** — both the tracker and summariser are managed by launchd: auto-start on login, auto-restart on crash
 - 🛡️ **Tamper detection** — a SHA-256 checksum sidecar file is updated on every log write; the summariser alerts if the log has been modified between writes
 - 👁️ **Watchdog** — the summariser checks every 5 minutes that the tracker service is still running, and sends an immediate alert if it has been stopped
 - 🔐 **Privacy-preserving AI** — only domain names (not full URLs or paths) are sent to OpenAI; complete URLs remain on the local machine only
-- 🔒 **Secrets via env vars** — no credentials ever hardcoded; all keys live in a `.env` file
+- **Secrets via env vars** — no credentials ever hardcoded; all keys live in `.env` and are loaded at runtime by the Python services. API keys are **not** embedded in the launchd plist files in `~/Library/LaunchAgents/`.
 
 ---
 
@@ -44,12 +44,16 @@ personal_tracker/
 ├── summarizer.py                       # Long-running scheduler daemon (APScheduler + OpenAI)
 ├── config.py                           # Environment variable loader
 ├── requirements.txt                    # Python dependencies
-├── com.tracker.web.plist               # launchd template — tracker service
-├── com.tracker.summary.plist           # launchd template — summariser service
+├── com.vigil.tracker.plist               # launchd template — tracker service
+├── com.vigil.summarizer.plist           # launchd template — summariser service
 ├── install.sh                          # One-command install script
 ├── uninstall.sh                        # One-command uninstall script
 ├── .env.template                       # Configuration template (copy to .env)
-└── detailed_activity_log.txt.sha256    # Tamper-detection checksum (auto-generated)
+├── detailed_activity_log.txt.sha256    # Tamper-detection checksum (auto-generated)
+└── tests/
+    ├── conftest.py                     # Shared pytest fixtures and env stubs
+    ├── test_tracker.py                 # Tests for tracker.py logic
+    └── test_summarizer.py              # Tests for summarizer.py logic
 ```
 
 ---
@@ -62,24 +66,15 @@ Complete **all** of the following before running `install.sh`.
 
 | macOS Version | Status | Notes |
 |---|---|---|
-| 15 Sequoia (2024) | ⚠️ Use with caution | `launchctl load/unload` deprecated; see note below |
-| 14 Sonoma (2023) | ⚠️ Use with caution | `launchctl load/unload` deprecated; see note below |
-| 13 Ventura (2022) | ⚠️ Use with caution | `launchctl load/unload` deprecated; see note below |
+| 15 Sequoia (2024) | ✅ Fully supported | Uses `launchctl bootstrap/bootout` |
+| 14 Sonoma (2023) | ✅ Fully supported | Uses `launchctl bootstrap/bootout` |
+| 13 Ventura (2022) | ✅ Fully supported | Uses `launchctl bootstrap/bootout` |
 | 12 Monterey (2021) | ✅ Fully supported | |
 | 11 Big Sur (2020) | ✅ Fully supported | |
 | 10.15 Catalina (2019) | ✅ Minimum supported | |
 | 10.14 Mojave or earlier | ❌ Not supported | Automation privacy permissions not enforced; AppleScript behaviour differs |
 
-> **Ventura / Sonoma / Sequoia note:** Apple deprecated `launchctl load` and `launchctl unload` in macOS 13+. The install and uninstall scripts use these legacy commands, which may fail silently on newer systems. If services don't start after installation, run the following manually:
-> ```bash
-> # Load (replace with your username UID from: id -u)
-> launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.tracker.web.plist
-> launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.tracker.summary.plist
->
-> # Unload
-> launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.tracker.web.plist
-> launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.tracker.summary.plist
-> ```
+The `install.sh` script automatically uses the correct launchctl commands for your macOS version (`bootstrap`/`bootout` on macOS 13+, `load`/`unload` on older versions). No manual commands needed.
 
 ### 2. Python 3.8+
 
@@ -111,14 +106,23 @@ On **macOS 10.15–12 Monterey** (System Preferences):
 2. Create an API key at **API Keys → Create new secret key**
 3. Ensure your account has billing enabled (gpt-4o-mini is very cheap — ~$0.001 per digest)
 
-### 5. MailerSend account & API key
+### 5. SMTP email credentials
 
-1. Sign up at [mailersend.com](https://www.mailersend.com)
-2. Add and verify a **sender domain** (e.g. `tracker.yourdomain.com`)
-3. Go to **API Tokens → Generate new token** with *Full access* or at minimum *Email send* permission
-4. Note the verified sender email address you will use as `MAILERSEND_FROM`
+Vigil sends emails using standard SMTP — no third-party account or API key required beyond your existing email provider.
+
+| Provider | SMTP host | Port |
+|---|---|---|
+| Gmail | `smtp.gmail.com` | 587 |
+| Outlook / Microsoft 365 | `smtp.office365.com` | 587 |
+| Fastmail | `smtp.fastmail.com` | 587 |
+| Apple iCloud | `smtp.mail.me.com` | 587 |
+| Any provider | check your provider's SMTP settings | 587 or 465 |
+
+> **Gmail users:** standard passwords won't work — you must create an **App Password** at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords). Enable 2-Step Verification first if you haven't already.
 
 ### 6. Configure `.env`
+
+The `install.sh` wizard will prompt for all required values and write `.env` for you. If you prefer to configure it manually:
 
 ```bash
 cp .env.template .env
@@ -130,16 +134,19 @@ Open `.env` and fill in your values:
 |---|---|
 | `OPENAI_API_KEY` | Your OpenAI secret key |
 | `OPENAI_MODEL` | Model to use (default: `gpt-4o-mini`) |
-| `MAILERSEND_API_KEY` | Your MailerSend API token |
-| `MAILERSEND_FROM` | Verified sender email address |
-| `MAILERSEND_TO` | Recipient email(s) — comma-separated for multiple (e.g. user and accountability partner) |
+| `SMTP_HOST` | SMTP server hostname (e.g. `smtp.gmail.com`) |
+| `SMTP_PORT` | SMTP port (default: `587` for STARTTLS, or `465` for SSL) |
+| `SMTP_USER` | SMTP login username (usually your full email address) |
+| `SMTP_PASS` | SMTP password or app password |
+| `SMTP_FROM` | Sender address (optional — defaults to `SMTP_USER`) |
+| `SMTP_TO` | Recipient email(s) — comma-separated for multiple (e.g. user and accountability partner) |
 | `SUMMARY_SCHEDULE` | `hourly` \| `daily` \| `weekly` \| `monthly` |
 | `SUMMARY_SCHEDULE_HOUR` | Hour to send (0–23, default `21`) |
 | `SUMMARY_SCHEDULE_MINUTE` | Minute to send (0–59, default `0`) |
 | `SUMMARY_SCHEDULE_WEEKDAY` | For weekly: `mon`–`sun` (default `mon`) |
 | `SUMMARY_SCHEDULE_DAY` | For monthly: day of month 1–28 (default `1`) |
 
-> **Accountability partner tip:** Add both your email and your partner's email to `MAILERSEND_TO`, separated by a comma. Both will receive every digest.
+> **Accountability partner tip:** Add both your email and your partner's email to `SMTP_TO`, separated by a comma. Both will receive every digest.
 
 **Schedule examples:**
 
@@ -171,13 +178,24 @@ SUMMARY_SCHEDULE_HOUR=9
 bash install.sh
 ```
 
-This will:
-1. Check prerequisites (macOS, Python version, pip, required files, internet)
-2. Validate your `.env`
-3. Install Python dependencies (`pip install -r requirements.txt`)
-4. Copy and configure both launchd services into `~/Library/LaunchAgents/`
-5. Load and start both services immediately
-6. Send a confirmation email with your configuration summary
+The installer will:
+1. Check prerequisites (macOS, Python 3.8+, pip, required files)
+2. **Prompt for any missing API keys** — no manual `.env` editing needed
+3. **Validate your credentials** against the OpenAI API and your SMTP server before proceeding
+4. **Remind you to grant macOS permissions** and offer to open System Settings directly
+5. Install Python dependencies (`pip install -r requirements.txt`)
+6. Install and start both launchd services (using the correct commands for your macOS version)
+7. Send a confirmation email with your configuration summary
+
+> **Already installed?** Re-run `bash install.sh` any time to update credentials or re-register services after moving the project directory.
+
+### Check service health
+
+```bash
+bash install.sh --status
+```
+
+Shows whether each service is running, and tails the last few lines of each log file.
 
 ---
 
@@ -216,12 +234,47 @@ You will be prompted whether to also delete log files and your `.env`.
 
 ---
 
-## 🧰 Tech Stack
+## 🧪 Testing
+
+The test suite covers all pure-logic functions in `tracker.py` and `summarizer.py`. No real log files, SMTP servers, or OpenAI API calls are made — all file I/O is redirected to temporary directories via pytest fixtures.
+
+### Run the tests
+
+```bash
+.venv/bin/pytest tests/ -v
+```
+
+### What is tested
+
+| File | Test class | What it covers |
+|---|---|---|
+| `tracker.py` | `TestUpdateIntegrityHash` | SHA-256 sidecar written correctly; no-op when log is absent |
+| `tracker.py` | `TestLogDurationEntry` | Entry format, timestamp pattern, hash updated on write |
+| `tracker.py` | `TestFinalizeSession` | Basic duration, idle gap excluded, open idle counted, short sessions discarded |
+| `tracker.py` | `TestGetLastLogTime` | Parses last-line timestamp; handles empty file, missing file, unparseable line |
+| `tracker.py` | `TestCheckForShutdownEvent` | Logs shutdown event when boot time is after last activity; no-op otherwise |
+| `tracker.py` | `TestGetActiveTabAppleScript` | Script contains Safari block and System Events block |
+| `summarizer.py` | `TestCleanupOldEntries` | Removes old entries, keeps recent ones, keeps undated lines (SYSTEM EVENT), no-op for zero-day retention, atomic write, hash refresh, no temp file left behind |
+| `summarizer.py` | `TestStripToDomain` | Full URLs stripped to domain; timestamps and durations preserved |
+| `summarizer.py` | `TestParseDurationEntries` | Accumulates time per domain; ignores undated lines |
+| `summarizer.py` | `TestFormatDuration` | Seconds → `30s`, `1m`, `1h`, `1h 1m` (parametrised) |
+| `summarizer.py` | `TestBuildTimePerDomainHtml` | Top-5 cap, empty input, total time displayed |
+| `summarizer.py` | `TestHtmlToText` | Tags stripped, excess whitespace collapsed |
+| `summarizer.py` | `TestSentinelFile` | Today/yesterday/missing sentinel; `_mark_sent_today` round-trip |
+| `summarizer.py` | `TestVerifyLogIntegrity` | Valid hash passes, tampered log fails, missing files treated as valid |
+
+### Adding tests
+
+`tests/conftest.py` stubs all required environment variables so `config.py` can be imported without a real `.env`. Use the `log_env` and `sentinel_env` fixtures (defined in `test_summarizer.py`) to redirect file paths to `tmp_path` and keep tests hermetic.
+
+---
+
+
 
 | Component | Library / Service | macOS requirement |
 |---|---|---|
 | Browser polling | AppleScript via `subprocess` | 10.15 Catalina+ (Automation permission) |
 | Scheduling | [APScheduler](https://apscheduler.readthedocs.io/) | — |
 | AI summarisation | [OpenAI Python SDK](https://github.com/openai/openai-python) | — |
-| Email delivery | [MailerSend REST API](https://developers.mailersend.com/) | — |
-| macOS daemon | launchd (`~/Library/LaunchAgents/`) | 10.15 Catalina+ (`load/unload` deprecated on 13+) |
+| Email delivery | SMTP via Python `smtplib` (stdlib — no extra package) | — |
+| macOS daemon | launchd (`~/Library/LaunchAgents/`) | 10.15 Catalina+ (`bootstrap`/`bootout` on 13+, `load`/`unload` on older) |

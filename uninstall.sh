@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# uninstall.sh — removes the Web Activity Tracker launchd services.
+# uninstall.sh — removes Vigil launchd services.
 
 set -euo pipefail
 
@@ -10,6 +10,19 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
 info()  { echo -e "${GREEN}[uninstall]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[uninstall]${NC} $*"; }
+
+# Detect macOS major version for launchctl compatibility
+MACOS_MAJOR=$(sw_vers -productVersion | cut -d. -f1)
+USER_UID=$(id -u)
+
+launchctl_unload() {
+    local plist="$1"
+    if (( MACOS_MAJOR >= 13 )); then
+        launchctl bootout "gui/${USER_UID}" "$plist" 2>/dev/null || true
+    else
+        launchctl unload "$plist" 2>/dev/null || true
+    fi
+}
 
 # ── Send uninstall notification email (before stopping services / deleting .env)
 ENV_FILE="$SCRIPT_DIR/.env"
@@ -36,23 +49,23 @@ else
 fi
 
 # ── Stop and remove tracker service ───────────────────────────────────────
-WEB_PLIST="$LAUNCH_AGENTS_DIR/com.tracker.web.plist"
+WEB_PLIST="$LAUNCH_AGENTS_DIR/com.vigil.tracker.plist"
 if [[ -f "$WEB_PLIST" ]]; then
-    launchctl unload "$WEB_PLIST" 2>/dev/null && info "Stopped com.tracker.web." || warn "com.tracker.web was not loaded."
+    launchctl_unload "$WEB_PLIST" && info "Stopped com.vigil.tracker." || warn "com.vigil.tracker was not loaded."
     rm -f "$WEB_PLIST"
     info "Removed $WEB_PLIST"
 else
-    warn "com.tracker.web.plist not found in LaunchAgents — already removed?"
+    warn "com.vigil.tracker.plist not found in LaunchAgents — already removed?"
 fi
 
 # ── Stop and remove summarizer service ────────────────────────────────────
-SUMMARY_PLIST="$LAUNCH_AGENTS_DIR/com.tracker.summary.plist"
+SUMMARY_PLIST="$LAUNCH_AGENTS_DIR/com.vigil.summarizer.plist"
 if [[ -f "$SUMMARY_PLIST" ]]; then
-    launchctl unload "$SUMMARY_PLIST" 2>/dev/null && info "Stopped com.tracker.summary." || warn "com.tracker.summary was not loaded."
+    launchctl_unload "$SUMMARY_PLIST" && info "Stopped com.vigil.summarizer." || warn "com.vigil.summarizer was not loaded."
     rm -f "$SUMMARY_PLIST"
     info "Removed $SUMMARY_PLIST"
 else
-    warn "com.tracker.summary.plist not found in LaunchAgents — already removed?"
+    warn "com.vigil.summarizer.plist not found in LaunchAgents — already removed?"
 fi
 
 # ── Optionally remove log files ────────────────────────────────────────────
@@ -84,6 +97,9 @@ if [[ -f "$ENV_FILE" ]]; then
     echo ""
     read -r -p "$(echo -e "${YELLOW}Delete .env (contains API keys)?${NC} [y/N] ")" DELETE_ENV
     if [[ "$DELETE_ENV" =~ ^[Yy]$ ]]; then
+        BACKUP="${ENV_FILE}.bak.$(date +%Y%m%d_%H%M%S)"
+        cp "$ENV_FILE" "$BACKUP"
+        info "Backed up .env to $BACKUP"
         rm -f "$ENV_FILE"
         info "Deleted .env"
     else
@@ -91,5 +107,18 @@ if [[ -f "$ENV_FILE" ]]; then
     fi
 fi
 
+# ── Optionally remove virtual environment ─────────────────────────────────
+VENV_DIR="$SCRIPT_DIR/.venv"
+if [[ -d "$VENV_DIR" ]]; then
+    echo ""
+    read -r -p "$(echo -e "${YELLOW}Delete Python virtual environment (.venv)?${NC} [y/N] ")" DELETE_VENV
+    if [[ "$DELETE_VENV" =~ ^[Yy]$ ]]; then
+        rm -rf "$VENV_DIR"
+        info "Deleted .venv"
+    else
+        info ".venv kept."
+    fi
+fi
+
 echo ""
-echo -e "${GREEN}✅  Uninstall complete. Web Activity Tracker has been removed.${NC}"
+echo -e "${GREEN}✅  Uninstall complete. Vigil has been removed.${NC}"
