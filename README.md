@@ -1,4 +1,4 @@
-# Personal Web Activity Tracker
+# Vigil
 
 > **⚠️ macOS only** — this tool uses AppleScript, launchd, and macOS-specific APIs. It does not run on Windows or Linux.
 
@@ -44,8 +44,8 @@ personal_tracker/
 ├── summarizer.py                       # Long-running scheduler daemon (APScheduler + OpenAI)
 ├── config.py                           # Environment variable loader
 ├── requirements.txt                    # Python dependencies
-├── com.tracker.web.plist               # launchd template — tracker service
-├── com.tracker.summary.plist           # launchd template — summariser service
+├── com.vigil.tracker.plist               # launchd template — tracker service
+├── com.vigil.summarizer.plist           # launchd template — summariser service
 ├── install.sh                          # One-command install script
 ├── uninstall.sh                        # One-command uninstall script
 ├── .env.template                       # Configuration template (copy to .env)

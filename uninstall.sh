@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# uninstall.sh — removes the Web Activity Tracker launchd services.
+# uninstall.sh — removes Vigil launchd services.
 
 set -euo pipefail
 
@@ -49,23 +49,23 @@ else
 fi
 
 # ── Stop and remove tracker service ───────────────────────────────────────
-WEB_PLIST="$LAUNCH_AGENTS_DIR/com.tracker.web.plist"
+WEB_PLIST="$LAUNCH_AGENTS_DIR/com.vigil.tracker.plist"
 if [[ -f "$WEB_PLIST" ]]; then
-    launchctl_unload "$WEB_PLIST" && info "Stopped com.tracker.web." || warn "com.tracker.web was not loaded."
+    launchctl_unload "$WEB_PLIST" && info "Stopped com.vigil.tracker." || warn "com.vigil.tracker was not loaded."
     rm -f "$WEB_PLIST"
     info "Removed $WEB_PLIST"
 else
-    warn "com.tracker.web.plist not found in LaunchAgents — already removed?"
+    warn "com.vigil.tracker.plist not found in LaunchAgents — already removed?"
 fi
 
 # ── Stop and remove summarizer service ────────────────────────────────────
-SUMMARY_PLIST="$LAUNCH_AGENTS_DIR/com.tracker.summary.plist"
+SUMMARY_PLIST="$LAUNCH_AGENTS_DIR/com.vigil.summarizer.plist"
 if [[ -f "$SUMMARY_PLIST" ]]; then
-    launchctl_unload "$SUMMARY_PLIST" && info "Stopped com.tracker.summary." || warn "com.tracker.summary was not loaded."
+    launchctl_unload "$SUMMARY_PLIST" && info "Stopped com.vigil.summarizer." || warn "com.vigil.summarizer was not loaded."
     rm -f "$SUMMARY_PLIST"
     info "Removed $SUMMARY_PLIST"
 else
-    warn "com.tracker.summary.plist not found in LaunchAgents — already removed?"
+    warn "com.vigil.summarizer.plist not found in LaunchAgents — already removed?"
 fi
 
 # ── Optionally remove log files ────────────────────────────────────────────
@@ -108,4 +108,4 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 echo ""
-echo -e "${GREEN}✅  Uninstall complete. Web Activity Tracker has been removed.${NC}"
+echo -e "${GREEN}✅  Uninstall complete. Vigil has been removed.${NC}"

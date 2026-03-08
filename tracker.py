@@ -248,7 +248,7 @@ def check_for_shutdown_event():
 
 def main():
     global _current_session
-    _log("Web Activity Tracker started.")
+    _log("Vigil started.")
     check_for_shutdown_event()
     script_source = get_active_tab_applescript()
 
@@ -299,7 +299,7 @@ def main():
     if _current_session is not None:
         _finalize_session(_current_session, datetime.now())
 
-    _log("Web Activity Tracker stopped.")
+    _log("Vigil stopped.")
 
 
 if __name__ == "__main__":

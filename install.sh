@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install.sh — installs the Web Activity Tracker as macOS launchd services.
+# install.sh — installs Vigil as macOS launchd services.
 #
 # Usage:
 #   bash install.sh              — guided install (wizard prompts for any missing .env values)
@@ -74,9 +74,9 @@ launchctl_service_status() {
 # ── --status flag ──────────────────────────────────────────────────────────
 if [[ "${1:-}" == "--status" ]]; then
     echo ""
-    echo -e "${BOLD}${GREEN}━━━━  Web Activity Tracker — Status  ━━━━${NC}"
+    echo -e "${BOLD}${GREEN}━━━━  Vigil — Status  ━━━━${NC}"
     echo ""
-    for label in com.tracker.web com.tracker.summary; do
+    for label in com.vigil.tracker com.vigil.summarizer; do
         svc_status=$(launchctl_service_status "$label")
         echo -e "  ${BOLD}${label}${NC}: ${svc_status}"
     done
@@ -124,7 +124,7 @@ info "Python $PY_VERSION ✓"
     || error "pip not available for $PYTHON_PATH. Try: $PYTHON_PATH -m ensurepip --upgrade"
 info "pip ✓"
 
-for f in requirements.txt com.tracker.web.plist com.tracker.summary.plist; do
+for f in requirements.txt com.vigil.tracker.plist com.vigil.summarizer.plist; do
     [[ ! -f "$SCRIPT_DIR/$f" ]] && error "Required file not found: $f"
 done
 info "Project files ✓  (macOS $(sw_vers -productVersion))"
@@ -132,7 +132,7 @@ info "Project files ✓  (macOS $(sw_vers -productVersion))"
 # ── Ensure .env.template exists ────────────────────────────────────────────
 if [[ ! -f "$ENV_TEMPLATE" ]]; then
     cat > "$ENV_TEMPLATE" <<'EOF'
-# Web Activity Tracker — environment variables
+# Vigil — environment variables
 # Run bash install.sh and the wizard will fill this in for you,
 # or copy to .env and edit manually.
 
@@ -341,20 +341,20 @@ mkdir -p "$LAUNCH_AGENTS_DIR"
 # ── Install tracker service ────────────────────────────────────────────────
 step "Installing launchd services..."
 
-WEB_PLIST_SRC="$SCRIPT_DIR/com.tracker.web.plist"
-WEB_PLIST_DST="$LAUNCH_AGENTS_DIR/com.tracker.web.plist"
+WEB_PLIST_SRC="$SCRIPT_DIR/com.vigil.tracker.plist"
+WEB_PLIST_DST="$LAUNCH_AGENTS_DIR/com.vigil.tracker.plist"
 launchctl_unload "$WEB_PLIST_DST"
 fill_plist "$WEB_PLIST_SRC" "$WEB_PLIST_DST"
 launchctl_load "$WEB_PLIST_DST"
-info "Tracker service installed and started (com.tracker.web) ✓"
+info "Tracker service installed and started (com.vigil.tracker) ✓"
 
 # ── Install summarizer service ─────────────────────────────────────────────
-SUMMARY_PLIST_SRC="$SCRIPT_DIR/com.tracker.summary.plist"
-SUMMARY_PLIST_DST="$LAUNCH_AGENTS_DIR/com.tracker.summary.plist"
+SUMMARY_PLIST_SRC="$SCRIPT_DIR/com.vigil.summarizer.plist"
+SUMMARY_PLIST_DST="$LAUNCH_AGENTS_DIR/com.vigil.summarizer.plist"
 launchctl_unload "$SUMMARY_PLIST_DST"
 fill_plist "$SUMMARY_PLIST_SRC" "$SUMMARY_PLIST_DST"
 launchctl_load "$SUMMARY_PLIST_DST"
-info "Summary service installed (com.tracker.summary) — schedule: ${SUMMARY_SCHEDULE} ✓"
+info "Summarizer service installed (com.vigil.summarizer) — schedule: ${SUMMARY_SCHEDULE} ✓"
 
 # ── Send confirmation email ────────────────────────────────────────────────
 step "Sending confirmation email..."

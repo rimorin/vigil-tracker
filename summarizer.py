@@ -279,13 +279,13 @@ def _post_email(payload: dict):
 def _send_alert_email(subject: str, html_body: str, plain_text: str):
     """Send a plain alert email (no digest heading, no AI involved)."""
     payload = {
-        "from": {"email": config.MAILERSEND_FROM, "name": "Web Activity Tracker"},
+        "from": {"email": config.MAILERSEND_FROM, "name": "Vigil"},
         "to": [{"email": e} for e in config.MAILERSEND_TO],
         "subject": subject,
         "html": _wrap_email_html(
-            heading="🌐 Web Activity Tracker",
+            heading="🌐 Vigil",
             body=html_body,
-            footer="Sent by your personal Web Activity Tracker.",
+            footer="Sent by Vigil.",
         ),
         "text": plain_text,
     }
@@ -308,7 +308,7 @@ def _check_tracker_alive():
     """Alert once when the tracker service transitions from running to stopped."""
     global _tracker_was_running
     result = subprocess.run(
-        ['launchctl', 'list', 'com.tracker.web'],
+        ['launchctl', 'list', 'com.vigil.tracker'],
         capture_output=True,
     )
     running = result.returncode == 0
@@ -317,7 +317,7 @@ def _check_tracker_alive():
         _log("⚠️ Tracker service not running — sending alert.")
         try:
             _send_alert_email(
-                subject="⚠️ Web Activity Tracker — Monitoring Stopped",
+                subject="⚠️ Vigil — Monitoring Stopped",
                 html_body="""
                 <h2>⚠️ Monitoring Service Stopped</h2>
                 <p>The browser tracking service has stopped. No browsing activity is being recorded.</p>
@@ -351,13 +351,13 @@ def _send_email(subject: str, html_body: str):
     heading = "🌐 Web Activity Digest"
     preamble = f'<p style="color: #777; font-size: 0.9em;">Your activity digest for {today_str}</p><hr/>'
     payload = {
-        "from": {"email": config.MAILERSEND_FROM, "name": "Web Activity Tracker"},
+        "from": {"email": config.MAILERSEND_FROM, "name": "Vigil"},
         "to": [{"email": e} for e in config.MAILERSEND_TO],
         "subject": subject,
         "html": _wrap_email_html(
             heading=heading,
             body=preamble + html_body,
-            footer="Sent by your personal Web Activity Tracker.",
+            footer="Sent by Vigil.",
         ),
         "text": f"{heading}\nYour activity digest for {today_str}\n\n{_html_to_text(html_body)}",
     }
@@ -376,7 +376,7 @@ def run_summary():
         _log("⚠️ Log integrity check failed — possible tampering detected.")
         try:
             _send_alert_email(
-                subject="⚠️ Web Activity Tracker — Log May Have Been Tampered With",
+                subject="⚠️ Vigil — Log May Have Been Tampered With",
                 html_body="""
                 <h2>⚠️ Log Integrity Check Failed</h2>
                 <p>The activity log file does not match its stored checksum.</p>
@@ -412,7 +412,7 @@ def run_summary():
         _log(f"OpenAI error: {exc}")
         try:
             _send_alert_email(
-                subject=f"⚠️ Web Activity Digest Failed — {today_str}",
+                subject=f"⚠️ Vigil Digest Failed — {today_str}",
                 html_body=f"""
                 <h2>⚠️ Digest Could Not Be Generated</h2>
                 <p>The AI summarisation step failed for <strong>{today_str}</strong>.</p>
@@ -434,7 +434,7 @@ def run_summary():
             _log(f"Failed to send OpenAI failure alert: {alert_exc}")
         return
 
-    subject = f"Your Web Activity Digest — {today_str}"
+    subject = f"Your Vigil Digest — {today_str}"
 
     # Prepend a factual, pre-computed time section before the AI narrative
     time_section = _build_time_per_domain_html(domain_times)
@@ -525,7 +525,7 @@ def send_confirmation_email():
 
     html_body = f"""
     <h2>✅ Installation Successful</h2>
-    <p>Your <strong>Web Activity Tracker</strong> is now active on <strong>{hostname}</strong>.</p>
+    <p>Your <strong>Vigil</strong> is now active on <strong>{hostname}</strong>.</p>
 
     <h2>⚙️ Configuration</h2>
     <table style="border-collapse: collapse; width: 100%;">
@@ -561,7 +561,7 @@ def send_confirmation_email():
 
     plain_text = (
         f"✅ Installation Successful\n"
-        f"Web Activity Tracker is now active on {hostname}.\n\n"
+        f"Vigil is now active on {hostname}.\n\n"
         f"Installed at:     {installed_at}\n"
         f"Digest schedule:  {schedule_desc}\n"
         f"AI engine:        {config.OPENAI_MODEL}\n"
@@ -574,13 +574,13 @@ def send_confirmation_email():
     )
 
     payload = {
-        "from": {"email": config.MAILERSEND_FROM, "name": "Web Activity Tracker"},
+        "from": {"email": config.MAILERSEND_FROM, "name": "Vigil"},
         "to": [{"email": e} for e in config.MAILERSEND_TO],
-        "subject": "✅ Web Activity Tracker — Installation Confirmed",
+        "subject": "✅ Vigil — Installation Confirmed",
         "html": _wrap_email_html(
-            heading="🌐 Web Activity Tracker",
+            heading="🌐 Vigil",
             body=html_body,
-            footer="Sent by your personal Web Activity Tracker.",
+            footer="Sent by Vigil.",
         ),
         "text": plain_text,
     }
@@ -595,7 +595,7 @@ def send_uninstall_email():
     html_body = f"""
     <h2>🛑 Tracker Uninstalled</h2>
     <p>
-      The <strong>Web Activity Tracker</strong> has been removed from
+      The <strong>Vigil</strong> has been removed from
       <strong>{hostname}</strong> on {uninstalled_at}.
     </p>
 
@@ -613,7 +613,7 @@ def send_uninstall_email():
 
     plain_text = (
         f"🛑 Tracker Uninstalled\n"
-        f"Web Activity Tracker has been removed from {hostname} on {uninstalled_at}.\n\n"
+        f"Vigil has been removed from {hostname} on {uninstalled_at}.\n\n"
         f"What was removed:\n"
         f"- The browser monitoring service and email digest service have been stopped.\n"
         f"- Browser activity is no longer being monitored.\n"
@@ -622,13 +622,13 @@ def send_uninstall_email():
     )
 
     payload = {
-        "from": {"email": config.MAILERSEND_FROM, "name": "Web Activity Tracker"},
+        "from": {"email": config.MAILERSEND_FROM, "name": "Vigil"},
         "to": [{"email": e} for e in config.MAILERSEND_TO],
-        "subject": "🛑 Web Activity Tracker — Uninstalled",
+        "subject": "🛑 Vigil — Uninstalled",
         "html": _wrap_email_html(
-            heading="🌐 Web Activity Tracker",
+            heading="🌐 Vigil",
             body=html_body,
-            footer="This is the final email from your Web Activity Tracker.",
+            footer="This is the final email from your Vigil.",
         ),
         "text": plain_text,
     }
