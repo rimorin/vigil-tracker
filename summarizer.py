@@ -94,6 +94,20 @@ def _already_sent_today() -> bool:
     return False
 
 
+def _missed_todays_schedule() -> bool:
+    """Return True if today's scheduled summary time has already passed but no digest was sent."""
+    if config.SUMMARY_SCHEDULE != "daily":
+        return False
+    now = datetime.now()
+    scheduled_today = now.replace(
+        hour=config.SUMMARY_SCHEDULE_HOUR,
+        minute=config.SUMMARY_SCHEDULE_MINUTE,
+        second=0,
+        microsecond=0,
+    )
+    return now > scheduled_today and not _already_sent_today()
+
+
 def _mark_sent_today():
     SENTINEL_FILE.write_text(str(date.today()))
 
@@ -770,8 +784,12 @@ def main():
     trigger, desc = _build_trigger()
     _log(f"Summarizer daemon started — schedule: {desc}")
 
+    if _missed_todays_schedule():
+        _log("Missed today's scheduled summary — running catch-up now.")
+        run_summary()
+
     _scheduler = BlockingScheduler(timezone=get_localzone_name())
-    _scheduler.add_job(run_summary, trigger, misfire_grace_time=3600)
+    _scheduler.add_job(run_summary, trigger, misfire_grace_time=86400)
     _scheduler.add_job(_check_tracker_alive, IntervalTrigger(minutes=5), id='watchdog')
     _scheduler.add_job(
         _cleanup_old_entries,

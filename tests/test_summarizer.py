@@ -8,8 +8,9 @@ never invoked.
 
 import hashlib
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -298,6 +299,48 @@ class TestSentinelFile:
     def test_mark_then_check_returns_true(self, sentinel_env):
         summarizer._mark_sent_today()
         assert summarizer._already_sent_today() is True
+
+
+# ---------------------------------------------------------------------------
+# _missed_todays_schedule
+# ---------------------------------------------------------------------------
+
+class TestMissedTodaysSchedule:
+    """_missed_todays_schedule returns True only for daily schedule when the
+    scheduled time has passed and no digest has been sent today."""
+
+    def _now_at(self, hour, minute=0):
+        return datetime.now().replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+    def test_returns_true_when_past_schedule_and_not_sent(self, sentinel_env, monkeypatch):
+        monkeypatch.setattr(config, "SUMMARY_SCHEDULE", "daily")
+        monkeypatch.setattr(config, "SUMMARY_SCHEDULE_HOUR", 6)
+        monkeypatch.setattr(config, "SUMMARY_SCHEDULE_MINUTE", 0)
+        with patch("summarizer.datetime") as mock_dt:
+            mock_dt.now.return_value = self._now_at(9)
+            assert summarizer._missed_todays_schedule() is True
+
+    def test_returns_false_when_before_schedule(self, sentinel_env, monkeypatch):
+        monkeypatch.setattr(config, "SUMMARY_SCHEDULE", "daily")
+        monkeypatch.setattr(config, "SUMMARY_SCHEDULE_HOUR", 6)
+        monkeypatch.setattr(config, "SUMMARY_SCHEDULE_MINUTE", 0)
+        with patch("summarizer.datetime") as mock_dt:
+            mock_dt.now.return_value = self._now_at(5)
+            assert summarizer._missed_todays_schedule() is False
+
+    def test_returns_false_when_already_sent_today(self, sentinel_env, monkeypatch):
+        monkeypatch.setattr(config, "SUMMARY_SCHEDULE", "daily")
+        monkeypatch.setattr(config, "SUMMARY_SCHEDULE_HOUR", 6)
+        monkeypatch.setattr(config, "SUMMARY_SCHEDULE_MINUTE", 0)
+        sentinel_env.write_text(str(date.today()))
+        with patch("summarizer.datetime") as mock_dt:
+            mock_dt.now.return_value = self._now_at(9)
+            assert summarizer._missed_todays_schedule() is False
+
+    def test_returns_false_for_non_daily_schedule(self, sentinel_env, monkeypatch):
+        for schedule in ("hourly", "weekly", "monthly", "interval"):
+            monkeypatch.setattr(config, "SUMMARY_SCHEDULE", schedule)
+            assert summarizer._missed_todays_schedule() is False
 
 
 # ---------------------------------------------------------------------------
