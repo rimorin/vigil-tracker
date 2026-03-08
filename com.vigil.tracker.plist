@@ -35,6 +35,6 @@
     <key>StandardOutPath</key>
     <string>/dev/null</string>
     <key>StandardErrorPath</key>
-    <string>__PROJECT_DIR__/tracker_stderr.log</string>
+    <string>__LOG_DIR__/tracker_stderr.log</string>
 </dict>
 </plist>

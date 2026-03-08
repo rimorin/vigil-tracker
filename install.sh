@@ -82,7 +82,7 @@ if [[ "${1:-}" == "--status" ]]; then
     done
     echo ""
     for log in tracker_daemon.log summarizer_daemon.log; do
-        log_path="$SCRIPT_DIR/$log"
+        log_path="$HOME/Library/Logs/Vigil/$log"
         if [[ -f "$log_path" ]]; then
             echo -e "${CYAN}── ${log} (last 5 lines) ──${NC}"
             tail -5 "$log_path"
@@ -90,7 +90,7 @@ if [[ "${1:-}" == "--status" ]]; then
         fi
     done
     for log in tracker_stderr.log summarizer_stderr.log; do
-        log_path="$SCRIPT_DIR/$log"
+        log_path="$HOME/Library/Logs/Vigil/$log"
         if [[ -f "$log_path" ]] && [[ -s "$log_path" ]]; then
             echo -e "${YELLOW}── ${log} (last 5 lines) ──${NC}"
             tail -5 "$log_path"
@@ -422,19 +422,21 @@ PYTHON_PATH="$VENV_DIR/bin/python3"
 info "Dependencies installed ✓"
 
 # ── Helper: fill plist templates ───────────────────────────────────────────
-# Only PYTHON_PATH and PROJECT_DIR are embedded in the plist.
+# Only PYTHON_PATH, PROJECT_DIR, and LOG_DIR are embedded in the plist.
 # All secrets (API keys, schedule) remain in .env and are loaded at runtime
 # by config.py via python-dotenv — they never touch the LaunchAgents directory.
 fill_plist() {
     local src="$1" dst="$2"
     _PLIST_PYTHON_PATH="$PYTHON_PATH" \
     _PLIST_PROJECT_DIR="$SCRIPT_DIR" \
+    _PLIST_LOG_DIR="$HOME/Library/Logs/Vigil" \
     "$PYTHON_PATH" - "$src" "$dst" <<'PYEOF'
 import os, sys
 content = open(sys.argv[1]).read()
 for placeholder, env_var in [
     ("__PYTHON_PATH__", "_PLIST_PYTHON_PATH"),
     ("__PROJECT_DIR__", "_PLIST_PROJECT_DIR"),
+    ("__LOG_DIR__",     "_PLIST_LOG_DIR"),
 ]:
     content = content.replace(placeholder, os.environ[env_var])
 open(sys.argv[2], "w").write(content)
@@ -442,6 +444,22 @@ PYEOF
 }
 
 mkdir -p "$LAUNCH_AGENTS_DIR"
+mkdir -p "$HOME/Library/Application Support/Vigil"
+mkdir -p "$HOME/Library/Logs/Vigil"
+
+# ── Migrate any existing log/data files from the repo dir ─────────────────
+for f in detailed_activity_log.txt detailed_activity_log.txt.sha256 last_summarized_date.txt; do
+    if [[ -f "$SCRIPT_DIR/$f" ]]; then
+        mv "$SCRIPT_DIR/$f" "$HOME/Library/Application Support/Vigil/$f"
+        info "Migrated $f → ~/Library/Application Support/Vigil/"
+    fi
+done
+for f in tracker_daemon.log summarizer_daemon.log; do
+    if [[ -f "$SCRIPT_DIR/$f" ]]; then
+        mv "$SCRIPT_DIR/$f" "$HOME/Library/Logs/Vigil/$f"
+        info "Migrated $f → ~/Library/Logs/Vigil/"
+    fi
+done
 
 # ── Install tracker service ────────────────────────────────────────────────
 step "Installing launchd services..."
@@ -476,8 +494,8 @@ echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━
 echo -e "${GREEN}  ✅  Installation complete!${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
-echo "  Tracker logs    : $SCRIPT_DIR/tracker_daemon.log"
-echo "  Summarizer logs : $SCRIPT_DIR/summarizer_daemon.log"
+echo "  Tracker logs    : ~/Library/Logs/Vigil/tracker_daemon.log"
+echo "  Summarizer logs : ~/Library/Logs/Vigil/summarizer_daemon.log"
 echo "  Check status    : bash $SCRIPT_DIR/install.sh --status"
 echo "  Reinstall       : bash $SCRIPT_DIR/install.sh --reinstall"
 echo "  To uninstall    : bash $SCRIPT_DIR/uninstall.sh"

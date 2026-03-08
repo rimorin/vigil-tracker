@@ -70,15 +70,13 @@ fi
 
 # ── Optionally remove log files ────────────────────────────────────────────
 LOG_FILES=(
-    "$SCRIPT_DIR/detailed_activity_log.txt"
-    "$SCRIPT_DIR/detailed_activity_log.txt.sha256"
-    "$SCRIPT_DIR/universal_activity_log.txt"
-    "$SCRIPT_DIR/web_activity_log.txt"
-    "$SCRIPT_DIR/tracker_daemon.log"
-    "$SCRIPT_DIR/tracker_stderr.log"
-    "$SCRIPT_DIR/summarizer_daemon.log"
-    "$SCRIPT_DIR/summarizer_stderr.log"
-    "$SCRIPT_DIR/last_summarized_date.txt"
+    "$HOME/Library/Application Support/Vigil/detailed_activity_log.txt"
+    "$HOME/Library/Application Support/Vigil/detailed_activity_log.txt.sha256"
+    "$HOME/Library/Application Support/Vigil/last_summarized_date.txt"
+    "$HOME/Library/Logs/Vigil/tracker_daemon.log"
+    "$HOME/Library/Logs/Vigil/tracker_stderr.log"
+    "$HOME/Library/Logs/Vigil/summarizer_daemon.log"
+    "$HOME/Library/Logs/Vigil/summarizer_stderr.log"
 )
 
 echo ""
@@ -88,6 +86,8 @@ if [[ "$DELETE_LOGS" =~ ^[Yy]$ ]]; then
         rm -f "$f" "$f".[1-9]   # also remove rotated backups (.log.1, .log.2, etc.)
         [[ -f "$f" ]] || [[ -f "$f.1" ]] || info "Deleted $f"
     done
+    rmdir "$HOME/Library/Application Support/Vigil" 2>/dev/null && info "Removed ~/Library/Application Support/Vigil/" || true
+    rmdir "$HOME/Library/Logs/Vigil" 2>/dev/null && info "Removed ~/Library/Logs/Vigil/" || true
 else
     info "Log files kept."
 fi

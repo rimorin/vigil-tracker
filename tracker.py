@@ -11,10 +11,14 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
-BASE_DIR = Path(__file__).parent.resolve()
-ACTIVITY_LOG = BASE_DIR / "detailed_activity_log.txt"
-INTEGRITY_FILE = BASE_DIR / "detailed_activity_log.txt.sha256"
-DAEMON_LOG = BASE_DIR / "tracker_daemon.log"
+APP_SUPPORT_DIR = Path.home() / "Library" / "Application Support" / "Vigil"
+LOG_DIR = Path.home() / "Library" / "Logs" / "Vigil"
+APP_SUPPORT_DIR.mkdir(parents=True, exist_ok=True)
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+ACTIVITY_LOG = APP_SUPPORT_DIR / "detailed_activity_log.txt"
+INTEGRITY_FILE = APP_SUPPORT_DIR / "detailed_activity_log.txt.sha256"
+DAEMON_LOG = LOG_DIR / "tracker_daemon.log"
 
 _running = True
 _current_session: Optional[dict] = None  # accessible by SIGTERM handler

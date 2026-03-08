@@ -1,20 +1,6 @@
 # Secrets and local config
 .env
 
-# Runtime log and data files
-detailed_activity_log.txt
-detailed_activity_log.txt.sha256
-detailed_activity_log.txt.sha256.*.bak
-universal_activity_log.txt
-web_activity_log.txt
-tracker_daemon.log
-tracker_daemon.log.*
-tracker_stderr.log
-summarizer_daemon.log
-summarizer_daemon.log.*
-summarizer_stderr.log
-last_summarized_date.txt
-
 # Python
 __pycache__/
 *.pyc

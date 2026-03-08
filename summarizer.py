@@ -38,11 +38,15 @@ from openai import OpenAI
 
 import config
 
-BASE_DIR = Path(__file__).parent.resolve()
-ACTIVITY_LOG = BASE_DIR / "detailed_activity_log.txt"
-INTEGRITY_FILE = BASE_DIR / "detailed_activity_log.txt.sha256"
-SENTINEL_FILE = BASE_DIR / "last_summarized_date.txt"
-SUMMARIZER_LOG = BASE_DIR / "summarizer_daemon.log"
+APP_SUPPORT_DIR = Path.home() / "Library" / "Application Support" / "Vigil"
+LOG_DIR = Path.home() / "Library" / "Logs" / "Vigil"
+APP_SUPPORT_DIR.mkdir(parents=True, exist_ok=True)
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+ACTIVITY_LOG = APP_SUPPORT_DIR / "detailed_activity_log.txt"
+INTEGRITY_FILE = APP_SUPPORT_DIR / "detailed_activity_log.txt.sha256"
+SENTINEL_FILE = APP_SUPPORT_DIR / "last_summarized_date.txt"
+SUMMARIZER_LOG = LOG_DIR / "summarizer_daemon.log"
 
 # gpt-4o-mini context window: 128k tokens. Each log line ≈ 20 tokens.
 # Cap at 3000 lines (~60k tokens) to leave room for prompt + response.
