@@ -176,7 +176,7 @@ step "Checking configuration..."
 read_env_value() {
     local key="$1" val
     val=$(grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r')
-    [[ "$val" == sk-... || "$val" == your-app-password || "$val" =~ example\.com || "$val" =~ gmail\.com$ ]] && val=""
+    [[ "$val" == "sk-..." || "$val" == "your-app-password" || "$val" =~ example\.com || "$val" == "you@gmail.com" ]] && val=""
     echo "$val"
 }
 
