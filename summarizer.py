@@ -23,7 +23,7 @@ import sys
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from logging.handlers import RotatingFileHandler
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from socket import gethostname
 from typing import List, Optional, Tuple
@@ -309,6 +309,65 @@ def _verify_log_integrity() -> bool:
 
 
 _tracker_was_running: bool = True  # module-level state for edge-transition alerting
+
+
+def _cleanup_old_entries():
+    """Prune activity log entries older than LOG_RETENTION_DAYS.
+
+    Reads the log line by line, drops entries whose date prefix falls before
+    the cutoff, then atomically rewrites the file and refreshes the integrity
+    hash.  Lines without a parseable date (e.g. [SYSTEM EVENT]) are kept.
+    A no-op when LOG_RETENTION_DAYS is 0 or the log is already within bounds.
+    """
+    if config.LOG_RETENTION_DAYS <= 0:
+        return
+    if not ACTIVITY_LOG.exists():
+        return
+
+    cutoff = date.today() - timedelta(days=config.LOG_RETENTION_DAYS)
+    cutoff_str = cutoff.strftime("%Y-%m-%d")
+
+    kept: list = []
+    removed = 0
+
+    with open(ACTIVITY_LOG, encoding="utf-8") as f:
+        for line in f:
+            m = re.match(r'\[(\d{4}-\d{2}-\d{2})', line)
+            if m and m.group(1) < cutoff_str:
+                removed += 1
+                continue
+            kept.append(line)
+
+    if removed == 0:
+        _log(
+            f"Log cleanup: nothing to remove "
+            f"(all entries within {config.LOG_RETENTION_DAYS}-day window)."
+        )
+        return
+
+    # Atomic rewrite: write to a sibling .tmp, then rename over the original
+    tmp = ACTIVITY_LOG.with_suffix(".tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.writelines(kept)
+        tmp.replace(ACTIVITY_LOG)
+    except Exception as exc:
+        _log(f"Log cleanup failed during write: {exc}")
+        tmp.unlink(missing_ok=True)
+        return
+
+    # Refresh integrity hash for the pruned file
+    try:
+        digest = hashlib.sha256(ACTIVITY_LOG.read_bytes()).hexdigest()
+        INTEGRITY_FILE.write_text(digest)
+    except Exception as exc:
+        _log(f"Log cleanup: integrity hash update failed: {exc}")
+
+    _log(
+        f"Log cleanup: removed {removed} entr{'y' if removed == 1 else 'ies'} "
+        f"older than {cutoff_str} ({config.LOG_RETENTION_DAYS}-day retention). "
+        f"{len(kept)} entr{'y' if len(kept) == 1 else 'ies'} retained."
+    )
 
 
 def _check_tracker_alive():
@@ -665,6 +724,12 @@ def main():
     _scheduler = BlockingScheduler(timezone=get_localzone_name())
     _scheduler.add_job(run_summary, trigger, misfire_grace_time=3600)
     _scheduler.add_job(_check_tracker_alive, IntervalTrigger(minutes=5), id='watchdog')
+    _scheduler.add_job(
+        _cleanup_old_entries,
+        IntervalTrigger(hours=24),
+        id='log_cleanup',
+        next_run_time=datetime.now(),  # run once immediately on startup, then every 24h
+    )
 
     try:
         _scheduler.start()

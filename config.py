@@ -57,3 +57,10 @@ if SUMMARY_SCHEDULE not in _VALID_SCHEDULES:
 
 # Number of minutes between digests — used when SUMMARY_SCHEDULE=interval
 SUMMARY_SCHEDULE_INTERVAL_MINUTES: int = int(os.environ.get("SUMMARY_SCHEDULE_INTERVAL_MINUTES", "60"))
+
+# ---------------------------------------------------------------------------
+# Log retention
+# ---------------------------------------------------------------------------
+# Activity log entries older than this many days are pruned by the daily
+# cleanup job in the summarizer daemon.
+LOG_RETENTION_DAYS: int = int(os.environ.get("LOG_RETENTION_DAYS", "30"))
