@@ -2,7 +2,7 @@
 
 > **⚠️ macOS only** — this tool uses AppleScript, launchd, and macOS-specific APIs. It does not run on Windows or Linux.
 
-A macOS background service that monitors your daily web browsing across all major browsers, uses **OpenAI** to generate an intelligent summary, and emails the digest to you (and optionally an accountability partner) on a configurable schedule — hourly, daily, weekly, or monthly — via **MailerSend**.
+A macOS background service that monitors your daily web browsing across all major browsers, uses **OpenAI** to generate an intelligent summary, and emails the digest to you (and optionally an accountability partner) on a configurable schedule — hourly, daily, weekly, or monthly — via **SMTP** (works with Gmail, Outlook, Fastmail, or any mail provider).
 
 ---
 
@@ -26,7 +26,7 @@ The person being monitored installs the tracker on their own machine with full k
 
 - 🌐 **Multi-browser support** — tracks exact URLs from Safari, Chrome, Edge, Brave, Arc, Vivaldi (including private/incognito windows); falls back to window title for Firefox, Tor Browser, and Opera
 - 🤖 **AI-powered digest** — OpenAI (`gpt-4o-mini` by default) categorises your activity, surfaces top domains, highlights notable browsing sessions, and **explicitly flags** any adult, gambling, or self-harm content
-- 📧 **Email delivery** — sends a clean HTML email via MailerSend with Overview, Top Domains, Categories, Timeline Highlights, and Concern Flags sections
+- 📧 **Email delivery** — sends a clean HTML email via SMTP (no third-party service required) with Overview, Top Domains, Categories, Timeline Highlights, and Concern Flags sections
 - ⏰ **Flexible schedule** — `hourly`, `daily`, `weekly`, or `monthly` digest controlled entirely by environment variables (powered by APScheduler)
 - 🚀 **Runs as a macOS daemon** — both the tracker and summariser are managed by launchd: auto-start on login, auto-restart on crash
 - 🛡️ **Tamper detection** — a SHA-256 checksum sidecar file is updated on every log write; the summariser alerts if the log has been modified between writes
@@ -102,12 +102,19 @@ On **macOS 10.15–12 Monterey** (System Preferences):
 2. Create an API key at **API Keys → Create new secret key**
 3. Ensure your account has billing enabled (gpt-4o-mini is very cheap — ~$0.001 per digest)
 
-### 5. MailerSend account & API key
+### 5. SMTP email credentials
 
-1. Sign up at [mailersend.com](https://www.mailersend.com)
-2. Add and verify a **sender domain** (e.g. `tracker.yourdomain.com`)
-3. Go to **API Tokens → Generate new token** with *Full access* or at minimum *Email send* permission
-4. Note the verified sender email address you will use as `MAILERSEND_FROM`
+Vigil sends emails using standard SMTP — no third-party account or API key required beyond your existing email provider.
+
+| Provider | SMTP host | Port |
+|---|---|---|
+| Gmail | `smtp.gmail.com` | 587 |
+| Outlook / Microsoft 365 | `smtp.office365.com` | 587 |
+| Fastmail | `smtp.fastmail.com` | 587 |
+| Apple iCloud | `smtp.mail.me.com` | 587 |
+| Any provider | check your provider's SMTP settings | 587 or 465 |
+
+> **Gmail users:** standard passwords won't work — you must create an **App Password** at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords). Enable 2-Step Verification first if you haven't already.
 
 ### 6. Configure `.env`
 
@@ -123,16 +130,19 @@ Open `.env` and fill in your values:
 |---|---|
 | `OPENAI_API_KEY` | Your OpenAI secret key |
 | `OPENAI_MODEL` | Model to use (default: `gpt-4o-mini`) |
-| `MAILERSEND_API_KEY` | Your MailerSend API token |
-| `MAILERSEND_FROM` | Verified sender email address |
-| `MAILERSEND_TO` | Recipient email(s) — comma-separated for multiple (e.g. user and accountability partner) |
+| `SMTP_HOST` | SMTP server hostname (e.g. `smtp.gmail.com`) |
+| `SMTP_PORT` | SMTP port (default: `587` for STARTTLS, or `465` for SSL) |
+| `SMTP_USER` | SMTP login username (usually your full email address) |
+| `SMTP_PASS` | SMTP password or app password |
+| `SMTP_FROM` | Sender address (optional — defaults to `SMTP_USER`) |
+| `SMTP_TO` | Recipient email(s) — comma-separated for multiple (e.g. user and accountability partner) |
 | `SUMMARY_SCHEDULE` | `hourly` \| `daily` \| `weekly` \| `monthly` |
 | `SUMMARY_SCHEDULE_HOUR` | Hour to send (0–23, default `21`) |
 | `SUMMARY_SCHEDULE_MINUTE` | Minute to send (0–59, default `0`) |
 | `SUMMARY_SCHEDULE_WEEKDAY` | For weekly: `mon`–`sun` (default `mon`) |
 | `SUMMARY_SCHEDULE_DAY` | For monthly: day of month 1–28 (default `1`) |
 
-> **Accountability partner tip:** Add both your email and your partner's email to `MAILERSEND_TO`, separated by a comma. Both will receive every digest.
+> **Accountability partner tip:** Add both your email and your partner's email to `SMTP_TO`, separated by a comma. Both will receive every digest.
 
 **Schedule examples:**
 
@@ -167,7 +177,7 @@ bash install.sh
 The installer will:
 1. Check prerequisites (macOS, Python 3.8+, pip, required files)
 2. **Prompt for any missing API keys** — no manual `.env` editing needed
-3. **Validate your credentials** against the OpenAI and MailerSend APIs before proceeding
+3. **Validate your credentials** against the OpenAI API and your SMTP server before proceeding
 4. **Remind you to grant macOS permissions** and offer to open System Settings directly
 5. Install Python dependencies (`pip install -r requirements.txt`)
 6. Install and start both launchd services (using the correct commands for your macOS version)
@@ -227,5 +237,5 @@ You will be prompted whether to also delete log files and your `.env`.
 | Browser polling | AppleScript via `subprocess` | 10.15 Catalina+ (Automation permission) |
 | Scheduling | [APScheduler](https://apscheduler.readthedocs.io/) | — |
 | AI summarisation | [OpenAI Python SDK](https://github.com/openai/openai-python) | — |
-| Email delivery | [MailerSend REST API](https://developers.mailersend.com/) | — |
+| Email delivery | SMTP via Python `smtplib` (stdlib — no extra package) | — |
 | macOS daemon | launchd (`~/Library/LaunchAgents/`) | 10.15 Catalina+ (`bootstrap`/`bootout` on 13+, `load`/`unload` on older) |

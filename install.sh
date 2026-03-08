@@ -148,9 +148,14 @@ if [[ ! -f "$ENV_TEMPLATE" ]]; then
 OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-4o-mini
 
-MAILERSEND_API_KEY=mlsn....
-MAILERSEND_FROM=tracker@yourdomain.com
-MAILERSEND_TO=you@example.com
+# SMTP email settings — works with Gmail, Outlook, Fastmail, or any SMTP provider
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=you@gmail.com
+SMTP_PASS=your-app-password
+# SMTP_FROM defaults to SMTP_USER if not set
+# SMTP_FROM=you@gmail.com
+SMTP_TO=you@example.com
 
 # Schedule: hourly | daily | weekly | monthly | interval
 SUMMARY_SCHEDULE=daily
@@ -171,7 +176,7 @@ step "Checking configuration..."
 read_env_value() {
     local key="$1" val
     val=$(grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r')
-    [[ "$val" == sk-... || "$val" == mlsn.... || "$val" =~ yourdomain || "$val" =~ example\.com ]] && val=""
+    [[ "$val" == sk-... || "$val" == your-app-password || "$val" =~ example\.com || "$val" =~ gmail\.com$ ]] && val=""
     echo "$val"
 }
 
@@ -194,7 +199,7 @@ PYEOF
 # Create .env from template if missing
 [[ ! -f "$ENV_FILE" ]] && cp "$ENV_TEMPLATE" "$ENV_FILE"
 
-REQUIRED_VARS=(OPENAI_API_KEY MAILERSEND_API_KEY MAILERSEND_FROM MAILERSEND_TO)
+REQUIRED_VARS=(OPENAI_API_KEY SMTP_HOST SMTP_USER SMTP_PASS SMTP_TO)
 MISSING_VARS=()
 for var in "${REQUIRED_VARS[@]}"; do
     val=$(read_env_value "$var")
@@ -216,15 +221,18 @@ if [[ ${#MISSING_VARS[@]} -gt 0 ]]; then
                 echo -e "  ${CYAN}OpenAI API key${NC}"
                 echo "  → https://platform.openai.com/api-keys"
                 ;;
-            MAILERSEND_API_KEY)
-                echo -e "  ${CYAN}MailerSend API key${NC}"
-                echo "  → https://app.mailersend.com/api-tokens"
+            SMTP_HOST)
+                echo -e "  ${CYAN}SMTP server hostname${NC}"
+                echo "  Gmail: smtp.gmail.com  |  Outlook: smtp.office365.com  |  Fastmail: smtp.fastmail.com"
                 ;;
-            MAILERSEND_FROM)
-                echo -e "  ${CYAN}Sender email address${NC} (must be a verified domain in MailerSend)"
-                echo "  e.g. tracker@yourdomain.com"
+            SMTP_USER)
+                echo -e "  ${CYAN}SMTP username${NC} (usually your full email address)"
                 ;;
-            MAILERSEND_TO)
+            SMTP_PASS)
+                echo -e "  ${CYAN}SMTP password / app password${NC}"
+                echo "  Gmail users: create an App Password at https://myaccount.google.com/apppasswords"
+                ;;
+            SMTP_TO)
                 echo -e "  ${CYAN}Recipient email address(es)${NC}"
                 echo "  Comma-separate to add an accountability partner, e.g. you@example.com,partner@example.com"
                 ;;
@@ -340,16 +348,32 @@ else
     warn "Could not verify OpenAI API key (HTTP ${OPENAI_HTTP}) — check your internet connection."
 fi
 
-# /v1/domains lists sender domains — a reliable auth check on all account types.
-MS_HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
-    -H "Authorization: Bearer ${MAILERSEND_API_KEY}" \
-    "https://api.mailersend.com/v1/domains" 2>/dev/null || echo "000")
-if [[ "$MS_HTTP" == "200" || "$MS_HTTP" == "403" ]]; then
-    info "MailerSend API key valid ✓"
-elif [[ "$MS_HTTP" == "401" ]]; then
-    error "MailerSend API key is invalid (HTTP 401). Update MAILERSEND_API_KEY in .env and re-run."
+# Test SMTP credentials by connecting and authenticating (no email sent)
+SMTP_TEST=$("$PYTHON_PATH" - \
+    "${SMTP_HOST}" "${SMTP_PORT:-587}" "${SMTP_USER}" "${SMTP_PASS}" <<'PYEOF' 2>&1 || true
+import smtplib, ssl, sys
+host, port, user, pw = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+try:
+    if port == 465:
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP_SSL(host, port, context=ctx, timeout=10) as s:
+            s.login(user, pw)
+    else:
+        with smtplib.SMTP(host, port, timeout=10) as s:
+            s.ehlo(); s.starttls(); s.ehlo(); s.login(user, pw)
+    print("ok")
+except smtplib.SMTPAuthenticationError:
+    print("auth_failed"); sys.exit(1)
+except Exception as e:
+    print(f"error: {e}"); sys.exit(2)
+PYEOF
+)
+if [[ "$SMTP_TEST" == "ok" ]]; then
+    info "SMTP credentials valid ✓"
+elif [[ "$SMTP_TEST" == "auth_failed" ]]; then
+    error "SMTP authentication failed. Check SMTP_USER and SMTP_PASS in .env."
 else
-    warn "Could not verify MailerSend API key (HTTP ${MS_HTTP}) — check your internet connection."
+    warn "Could not verify SMTP credentials: ${SMTP_TEST} — check your internet connection."
 fi
 
 # ── macOS permission reminder ──────────────────────────────────────────────
@@ -440,7 +464,7 @@ info "Summarizer service installed (com.vigil.summarizer) — schedule: ${SUMMAR
 # ── Send confirmation email ────────────────────────────────────────────────
 step "Sending confirmation email..."
 if "$PYTHON_PATH" "$SCRIPT_DIR/summarizer.py" --confirm; then
-    info "Confirmation email sent to ${MAILERSEND_TO} ✓"
+    info "Confirmation email sent to ${SMTP_TO} ✓"
 else
     warn "Confirmation email failed — check your MailerSend / OpenAI credentials."
     warn "The services are still running; this does not affect normal operation."

@@ -13,19 +13,21 @@ Run directly or managed by launchd (KeepAlive=true).
 """
 
 import hashlib
-import json
 import logging
 import re
 import signal
+import smtplib
+import ssl
 import subprocess
 import sys
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from logging.handlers import RotatingFileHandler
 from datetime import date, datetime
 from pathlib import Path
 from socket import gethostname
 from typing import List, Optional, Tuple
 
-import requests
 from collections import defaultdict
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -257,19 +259,27 @@ def _html_to_text(html: str) -> str:
     return text.strip()
 
 
-def _post_email(payload: dict):
-    """Send a prepared MailerSend payload and raise on API failure."""
-    resp = requests.post(
-        "https://api.mailersend.com/v1/email",
-        headers={
-            "Authorization": f"Bearer {config.MAILERSEND_API_KEY}",
-            "Content-Type": "application/json",
-        },
-        data=json.dumps(payload),
-        timeout=30,
-    )
-    if resp.status_code not in (200, 202):
-        raise RuntimeError(f"MailerSend API error {resp.status_code}: {resp.text}")
+def _send_smtp(subject: str, html_body: str, plain_text: str) -> None:
+    """Send an email via SMTP using credentials from config."""
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = f"Vigil <{config.SMTP_FROM}>"
+    msg["To"] = ", ".join(config.SMTP_TO)
+    msg.attach(MIMEText(plain_text, "plain", "utf-8"))
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+    if config.SMTP_PORT == 465:
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP_SSL(config.SMTP_HOST, config.SMTP_PORT, context=ctx, timeout=30) as smtp:
+            smtp.login(config.SMTP_USER, config.SMTP_PASS)
+            smtp.sendmail(config.SMTP_FROM, config.SMTP_TO, msg.as_string())
+    else:
+        with smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT, timeout=30) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.ehlo()
+            smtp.login(config.SMTP_USER, config.SMTP_PASS)
+            smtp.sendmail(config.SMTP_FROM, config.SMTP_TO, msg.as_string())
 
 
 # ---------------------------------------------------------------------------
@@ -278,18 +288,15 @@ def _post_email(payload: dict):
 
 def _send_alert_email(subject: str, html_body: str, plain_text: str):
     """Send a plain alert email (no digest heading, no AI involved)."""
-    payload = {
-        "from": {"email": config.MAILERSEND_FROM, "name": "Vigil"},
-        "to": [{"email": e} for e in config.MAILERSEND_TO],
-        "subject": subject,
-        "html": _wrap_email_html(
+    _send_smtp(
+        subject=subject,
+        html_body=_wrap_email_html(
             heading="🌐 Vigil",
             body=html_body,
             footer="Sent by Vigil.",
         ),
-        "text": plain_text,
-    }
-    _post_email(payload)
+        plain_text=plain_text,
+    )
 
 
 def _verify_log_integrity() -> bool:
@@ -348,20 +355,17 @@ def _check_tracker_alive():
 
 def _send_email(subject: str, html_body: str):
     today_str = date.today().strftime("%B %d, %Y")
-    heading = "🌐 Web Activity Digest"
+    heading = "🔦 Vigil Digest"
     preamble = f'<p style="color: #777; font-size: 0.9em;">Your activity digest for {today_str}</p><hr/>'
-    payload = {
-        "from": {"email": config.MAILERSEND_FROM, "name": "Vigil"},
-        "to": [{"email": e} for e in config.MAILERSEND_TO],
-        "subject": subject,
-        "html": _wrap_email_html(
+    _send_smtp(
+        subject=subject,
+        html_body=_wrap_email_html(
             heading=heading,
             body=preamble + html_body,
             footer="Sent by Vigil.",
         ),
-        "text": f"{heading}\nYour activity digest for {today_str}\n\n{_html_to_text(html_body)}",
-    }
-    _post_email(payload)
+        plain_text=f"{heading}\nYour activity digest for {today_str}\n\n{_html_to_text(html_body)}",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -543,7 +547,7 @@ def send_confirmation_email():
       </tr>
       <tr>
         <td style="{th}">Sending to</td>
-        <td style="{td}">{"<br>".join(config.MAILERSEND_TO)}</td>
+        <td style="{td}">{"<br>".join(config.SMTP_TO)}</td>
       </tr>
     </table>
 
@@ -565,7 +569,7 @@ def send_confirmation_email():
         f"Installed at:     {installed_at}\n"
         f"Digest schedule:  {schedule_desc}\n"
         f"AI engine:        {config.OPENAI_MODEL}\n"
-        f"Sending to:       {', '.join(config.MAILERSEND_TO)}\n\n"
+        f"Sending to:       {', '.join(config.SMTP_TO)}\n\n"
         f"What happens next?\n"
         f"- The tracker is running in the background and logging your browser activity.\n"
         f"- You will receive your first digest {schedule_desc}.\n"
@@ -573,18 +577,15 @@ def send_confirmation_email():
         f"Both background services will restart automatically after a reboot or crash."
     )
 
-    payload = {
-        "from": {"email": config.MAILERSEND_FROM, "name": "Vigil"},
-        "to": [{"email": e} for e in config.MAILERSEND_TO],
-        "subject": "✅ Vigil — Installation Confirmed",
-        "html": _wrap_email_html(
+    _send_smtp(
+        subject="✅ Vigil — Installation Confirmed",
+        html_body=_wrap_email_html(
             heading="🌐 Vigil",
             body=html_body,
             footer="Sent by Vigil.",
         ),
-        "text": plain_text,
-    }
-    _post_email(payload)
+        plain_text=plain_text,
+    )
 
 
 def send_uninstall_email():
@@ -621,18 +622,15 @@ def send_uninstall_email():
         f"To reinstall at any time, run: bash install.sh"
     )
 
-    payload = {
-        "from": {"email": config.MAILERSEND_FROM, "name": "Vigil"},
-        "to": [{"email": e} for e in config.MAILERSEND_TO],
-        "subject": "🛑 Vigil — Uninstalled",
-        "html": _wrap_email_html(
+    _send_smtp(
+        subject="🛑 Vigil — Uninstalled",
+        html_body=_wrap_email_html(
             heading="🌐 Vigil",
             body=html_body,
             footer="This is the final email from your Vigil.",
         ),
-        "text": plain_text,
-    }
-    _post_email(payload)
+        plain_text=plain_text,
+    )
 
 
 # ---------------------------------------------------------------------------
