@@ -12,6 +12,7 @@ Schedule is controlled entirely via environment variables (see config.py):
 Run directly or managed by launchd (KeepAlive=true).
 """
 
+import concurrent.futures
 import hashlib
 import logging
 import re
@@ -259,8 +260,11 @@ def _html_to_text(html: str) -> str:
     return text.strip()
 
 
-def _send_smtp(subject: str, html_body: str, plain_text: str) -> None:
-    """Send an email via SMTP using credentials from config."""
+_SMTP_WALL_TIMEOUT = 60  # seconds — hard limit for the entire SMTP transaction
+
+
+def _do_send_smtp(subject: str, html_body: str, plain_text: str) -> None:
+    """Low-level SMTP send. Called inside a thread with a wall-clock timeout."""
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = f"Vigil <{config.SMTP_FROM}>"
@@ -280,6 +284,25 @@ def _send_smtp(subject: str, html_body: str, plain_text: str) -> None:
             smtp.ehlo()
             smtp.login(config.SMTP_USER, config.SMTP_PASS)
             smtp.sendmail(config.SMTP_FROM, config.SMTP_TO, msg.as_string())
+
+
+def _send_smtp(subject: str, html_body: str, plain_text: str) -> None:
+    """Send an email via SMTP, enforcing a hard wall-clock timeout.
+
+    smtplib's per-operation socket timeout does not reliably cover all
+    application-level calls (login, sendmail).  Running the transaction in a
+    dedicated thread and joining with a timeout prevents a hung SMTP server
+    from blocking the APScheduler thread pool indefinitely.
+    """
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_do_send_smtp, subject, html_body, plain_text)
+        try:
+            future.result(timeout=_SMTP_WALL_TIMEOUT)
+        except concurrent.futures.TimeoutError:
+            raise RuntimeError(
+                f"SMTP send timed out after {_SMTP_WALL_TIMEOUT}s "
+                f"(host: {config.SMTP_HOST}:{config.SMTP_PORT})"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -414,16 +437,22 @@ def _check_tracker_alive():
 
 def _send_email(subject: str, html_body: str):
     today_str = date.today().strftime("%B %d, %Y")
-    heading = "🔦 Vigil Digest"
-    preamble = f'<p style="color: #777; font-size: 0.9em;">Your activity digest for {today_str}</p><hr/>'
+    hostname  = gethostname()
+    heading   = "🔦 Vigil Digest"
+    preamble  = (
+        f'<p style="color: #777; font-size: 0.9em;">'
+        f'Your activity digest for {today_str} &mdash; '
+        f'<strong>{hostname}</strong>'
+        f'</p><hr/>'
+    )
     _send_smtp(
         subject=subject,
         html_body=_wrap_email_html(
             heading=heading,
             body=preamble + html_body,
-            footer="Sent by Vigil.",
+            footer=f"Sent by Vigil on {hostname}.",
         ),
-        plain_text=f"{heading}\nYour activity digest for {today_str}\n\n{_html_to_text(html_body)}",
+        plain_text=f"{heading}\n{today_str} — {hostname}\n\n{_html_to_text(html_body)}",
     )
 
 
@@ -439,17 +468,24 @@ def run_summary():
         _log("⚠️ Log integrity check failed — possible tampering detected.")
         try:
             _send_alert_email(
-                subject="⚠️ Vigil — Log May Have Been Tampered With",
+                subject="⚠️ Vigil — Log Integrity Check Failed",
                 html_body="""
                 <h2>⚠️ Log Integrity Check Failed</h2>
                 <p>The activity log file does not match its stored checksum.</p>
-                <p>This may indicate that log entries were edited or deleted.</p>
+                <p>This can happen if:</p>
+                <ul>
+                  <li>Log entries were edited or deleted manually.</li>
+                  <li>The tracker process was killed abruptly (e.g. power loss) between
+                      writing an entry and updating the checksum. In this case the hash
+                      will be reconciled automatically on the next tracker restart.</li>
+                </ul>
                 <p style="color:#888; font-size:0.9em;">The digest for today has been skipped.</p>
                 """,
                 plain_text=(
                     "⚠️ Log Integrity Check Failed\n\n"
                     "The activity log file does not match its stored checksum.\n"
-                    "This may indicate that log entries were edited or deleted.\n\n"
+                    "This can happen if log entries were edited or deleted, or if the tracker\n"
+                    "was killed abruptly before the checksum could be updated.\n\n"
                     "The digest for today has been skipped."
                 ),
             )
@@ -466,8 +502,9 @@ def run_summary():
         _log("No activity logged — skipping email.")
         return
 
+    original_entry_count = len(entries)
     domain_times = parse_duration_entries(entries)
-    _log(f"Found {len(entries)} entries. Calling OpenAI ({config.OPENAI_MODEL})...")
+    _log(f"Found {original_entry_count} entries. Calling OpenAI ({config.OPENAI_MODEL})...")
     today_str = date.today().strftime("%B %d, %Y")
     try:
         summary_html = _summarise_with_openai(entries, domain_times)
@@ -499,9 +536,21 @@ def run_summary():
 
     subject = f"Your Vigil Digest — {today_str}"
 
+    # Warn in the email when the log was too large to analyse in full
+    truncation_banner = ""
+    if original_entry_count > MAX_LOG_LINES:
+        truncation_banner = (
+            f'<p style="color:#e67e22; background:#fef9e7; padding:10px 12px; '
+            f'border-left:4px solid #e67e22; margin-bottom:16px;">'
+            f'<strong>⚠️ Note:</strong> Today\'s activity log had '
+            f'<strong>{original_entry_count:,} entries</strong>. '
+            f'Only the most recent <strong>{MAX_LOG_LINES:,}</strong> were analysed '
+            f'due to context limits.</p>'
+        )
+
     # Prepend a factual, pre-computed time section before the AI narrative
     time_section = _build_time_per_domain_html(domain_times)
-    full_body = time_section + summary_html if time_section else summary_html
+    full_body = truncation_banner + time_section + summary_html
 
     _log("Sending email via MailerSend...")
     try:

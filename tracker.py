@@ -67,11 +67,14 @@ def get_idle_seconds() -> float:
 # ---------------------------------------------------------------------------
 
 def _handle_signal(signum, frame):
-    """Finalise the open session and stop the tracker when launchd sends SIGTERM."""
-    global _running, _current_session
-    if _current_session is not None:
-        _finalize_session(_current_session, datetime.now())
-        _current_session = None
+    """Stop the main loop on SIGTERM/SIGINT.
+
+    Session finalisation is intentionally deferred to the post-loop block in
+    main() so it always runs in the main thread, avoiding a race condition
+    where the signal could arrive while the loop is mid-way through updating
+    _current_session's idle fields.
+    """
+    global _running
     _running = False
 
 
@@ -249,6 +252,11 @@ def check_for_shutdown_event():
 def main():
     global _current_session
     _log("Vigil started.")
+    # Reconcile the integrity hash on every startup.  If the process was killed
+    # between writing a log entry and updating the hash (e.g. power loss), the
+    # sidecar would be stale and trigger a false tamper alert.  Recomputing here
+    # ensures the summariser always sees a consistent state.
+    _update_integrity_hash()
     check_for_shutdown_event()
     script_source = get_active_tab_applescript()
 
