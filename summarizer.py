@@ -26,6 +26,7 @@ from socket import gethostname
 from typing import List, Optional, Tuple
 
 import requests
+from collections import defaultdict
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -111,7 +112,7 @@ def _read_today_entries() -> List[str]:
 # AI summarisation
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT = """You are a personal productivity assistant. 
+SYSTEM_PROMPT = """You are a personal productivity assistant.
 Analyse the user's web browsing log for today and produce a concise HTML summary.
 Structure your response as valid HTML (no markdown, no code fences) with these sections:
 
@@ -122,12 +123,14 @@ Structure your response as valid HTML (no markdown, no code fences) with these s
 <h2>🚨 Concern Flags</h2>
 
 Guidelines:
-- Overview: total URLs visited, estimated active browsing time (assume ~1 min per unique URL), main themes.
-- Top Domains: list the top 5 domains visited (most frequent first), with visit count.
+- Each log line has the format: [HH:MM:SS] [Browser] domain.com [duration: Xs]
+- Overview: total visits, total active browsing time (sum all [duration: Xs] fields), main themes.
+- Top Domains: list the top 5 domains by TOTAL TIME SPENT (sum [duration: Xs] per domain),
+  most time first; include the formatted duration next to each domain.
 - Categories: group sites into buckets like Productivity, Social Media, News, Entertainment, Research, Other.
 - Timeline Highlights: pick 3-5 interesting or notable moments from the day.
 - Concern Flags: explicitly check for visits to adult content, pornography, gambling, self-harm, or
-  substance abuse sites. If any are found, list each domain with visit count
+  substance abuse sites. If any are found, list each domain with total time spent
   using inline style color:#c0392b (red). If none found, write a single line: "✅ No flagged content detected."
   Do not soften, omit, or euphemise findings — be direct and factual.
 - Keep the tone neutral and factual for all other sections.
@@ -138,14 +141,62 @@ Guidelines:
 def _strip_to_domain(entries: List[str]) -> List[str]:
     """Replace full URLs with domain names only before sending to OpenAI.
 
-    Keeps timestamps and browser tags intact so the AI can still produce
-    timeline and frequency analysis — but paths, query strings, and page
-    slugs never leave the machine.
+    Keeps timestamps, browser tags, and [duration: Xs] suffixes intact so the
+    AI can still produce timeline, frequency, and duration analysis — but paths,
+    query strings, and page slugs never leave the machine.
     """
     return [re.sub(r'https?://([^/\s]+)[^\s]*', r'\1', entry) for entry in entries]
 
 
-def _summarise_with_openai(entries: List[str]) -> str:
+# Matches duration log entries:  [timestamp] [Browser] https://... [duration: Xs]
+_DURATION_ENTRY_RE = re.compile(
+    r'\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] \[.+?\] https?://[^\s]+ \[duration: (\d+)s\]'
+)
+
+
+def parse_duration_entries(entries: List[str]) -> dict:
+    """Return {domain: total_seconds} accumulated from [duration: Xs] log lines."""
+    domain_times: dict = defaultdict(int)
+    for entry in entries:
+        m = _DURATION_ENTRY_RE.search(entry)
+        if not m:
+            continue
+        seconds = int(m.group(1))
+        url_match = re.search(r'https?://([^/\s]+)', entry)
+        if url_match:
+            domain_times[url_match.group(1)] += seconds
+    return dict(domain_times)
+
+
+def _format_duration(seconds: int) -> str:
+    """Format a number of seconds as a human-readable string (e.g. '2h 15m', '45m', '30s')."""
+    if seconds >= 3600:
+        h, rem = divmod(seconds, 3600)
+        m = rem // 60
+        return f"{h}h {m}m" if m else f"{h}h"
+    if seconds >= 60:
+        return f"{seconds // 60}m"
+    return f"{seconds}s"
+
+
+def _build_time_per_domain_html(domain_times: dict) -> str:
+    """Return an HTML section listing the top 5 domains by time spent."""
+    if not domain_times:
+        return ""
+    top = sorted(domain_times.items(), key=lambda x: x[1], reverse=True)[:5]
+    total = sum(domain_times.values())
+    rows = "".join(
+        f"<li><strong>{domain}</strong> — {_format_duration(secs)}</li>"
+        for domain, secs in top
+    )
+    return (
+        f'<h2>⏱️ Time Per Domain</h2>'
+        f'<p style="color:#777; font-size:0.9em;">Total active browsing time: {_format_duration(total)}</p>'
+        f"<ul>{rows}</ul>"
+    )
+
+
+def _summarise_with_openai(entries: List[str], domain_times: dict) -> str:
     # Truncate if the log is unusually large to stay within context limits
     if len(entries) > MAX_LOG_LINES:
         _log(f"Log has {len(entries)} entries — truncating to last {MAX_LOG_LINES} for summarisation.")
@@ -153,11 +204,22 @@ def _summarise_with_openai(entries: List[str]) -> str:
 
     client = _get_openai_client()
     log_text = "\n".join(_strip_to_domain(entries))
+
+    # Provide pre-computed domain totals so the AI doesn't have to aggregate manually
+    if domain_times:
+        top = sorted(domain_times.items(), key=lambda x: x[1], reverse=True)[:10]
+        time_context = "Pre-computed time per domain: " + ", ".join(
+            f"{d} ({_format_duration(s)})" for d, s in top
+        )
+        user_content = f"Here is today's browsing log:\n\n{log_text}\n\n{time_context}"
+    else:
+        user_content = f"Here is today's browsing log:\n\n{log_text}"
+
     response = client.chat.completions.create(
         model=config.OPENAI_MODEL,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"Here is today's browsing log:\n\n{log_text}"},
+            {"role": "user",   "content": user_content},
         ],
         temperature=0.3,
         max_tokens=MAX_RESPONSE_TOKENS,
@@ -341,10 +403,11 @@ def run_summary():
         _log("No activity logged — skipping email.")
         return
 
+    domain_times = parse_duration_entries(entries)
     _log(f"Found {len(entries)} entries. Calling OpenAI ({config.OPENAI_MODEL})...")
     today_str = date.today().strftime("%B %d, %Y")
     try:
-        summary_html = _summarise_with_openai(entries)
+        summary_html = _summarise_with_openai(entries, domain_times)
     except Exception as exc:
         _log(f"OpenAI error: {exc}")
         try:
@@ -373,9 +436,13 @@ def run_summary():
 
     subject = f"Your Web Activity Digest — {today_str}"
 
+    # Prepend a factual, pre-computed time section before the AI narrative
+    time_section = _build_time_per_domain_html(domain_times)
+    full_body = time_section + summary_html if time_section else summary_html
+
     _log("Sending email via MailerSend...")
     try:
-        _send_email(subject, summary_html)
+        _send_email(subject, full_body)
     except Exception as exc:
         _log(f"Email send error: {exc}")
         return
