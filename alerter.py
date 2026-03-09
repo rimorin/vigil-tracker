@@ -2,7 +2,7 @@
 alerter.py — real-time adult/porn site detection and alerting.
 
 Called by tracker.py on every URL change.  Detection is entirely offline:
-  1. Domain blocklist  — exact match against data/adult_domains.txt
+  1. Domain blocklist  — exact match against data/domains.txt
   2. Keyword matching  — adult-related substrings found in the domain name
 
 When a match is found, one or both alert channels fire (configured via .env):
@@ -62,11 +62,11 @@ _DEVICE_NAME: str = _get_device_name()
 # Blocklist — loaded once at import time into a set for O(1) lookup
 # ---------------------------------------------------------------------------
 
-_BLOCKLIST_PATH = Path(__file__).parent / "data" / "adult_domains.txt"
+_BLOCKLIST_PATH = Path(__file__).parent / "data" / "domains.txt"
 
 
 def _load_blocklist() -> frozenset:
-    """Read data/adult_domains.txt and return a frozenset of bare domains."""
+    """Read data/domains.txt and return a frozenset of bare domains."""
     try:
         domains = set()
         for line in _BLOCKLIST_PATH.read_text(encoding="utf-8").splitlines():

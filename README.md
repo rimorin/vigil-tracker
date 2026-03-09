@@ -82,12 +82,43 @@ personal_tracker/
 ├── uninstall.sh                # One-command removal
 ├── .env.template               # Settings template — copy to .env and fill in
 ├── data/
-│   └── adult_domains.txt       # Offline blocklist for instant alerts
+│   └── domains.txt             # Offline blocklist for instant alerts
 └── tests/
     ├── conftest.py
     ├── test_tracker.py
     └── test_summarizer.py
 ```
+
+---
+
+## 🗂 Updating the Domain Blocklist
+
+Vigil detects pornographic sites by matching visited domains against `data/domains.txt` — a plain-text file with one domain per line (comments start with `#`).
+
+**To add domains manually**, open `data/domains.txt` and append entries:
+
+```
+example-adult-site.com
+another-site.net
+```
+
+**To replace the list with a fresh community blocklist**, download any plain-text domain blocklist and drop it in as `data/domains.txt`. A commonly used source:
+
+```bash
+# Example — Steven Black's unified hosts list (porn category)
+curl -o data/domains.txt \
+  "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn-only/hosts"
+
+# Strip the hosts file format down to bare domains
+grep -v '^#' data/domains.txt | grep -v '^$' | awk '{print $2}' | grep -v '^0\.0\.0\.0$' > data/domains_clean.txt
+mv data/domains_clean.txt data/domains.txt
+```
+
+> Vigil reads the blocklist once at startup. After editing `domains.txt`, restart the tracker service for changes to take effect:
+> ```bash
+> launchctl unload ~/Library/LaunchAgents/com.vigil.tracker.plist
+> launchctl load  ~/Library/LaunchAgents/com.vigil.tracker.plist
+> ```
 
 ---
 
