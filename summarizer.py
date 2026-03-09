@@ -217,6 +217,38 @@ def _build_time_per_domain_html(domain_times: dict) -> str:
     )
 
 
+def _build_plain_digest_html(entries: List[str], domain_times: dict) -> str:
+    """Return a simple HTML digest listing all visited domains and visit log — no AI required."""
+    total_seconds = sum(domain_times.values())
+    total_visits = len(entries)
+
+    # All domains sorted by time descending
+    all_domains = sorted(domain_times.items(), key=lambda x: x[1], reverse=True)
+    domain_rows = "".join(
+        f"<li><strong>{domain}</strong> — {_format_duration(secs)}</li>"
+        for domain, secs in all_domains
+    )
+
+    # Visit log: strip URLs to domains, most recent last
+    _url_to_domain = lambda e: re.sub(r'https?://([^/\s]+)[^\s]*', r'\1', e)
+    log_rows = "".join(
+        "<li style='font-size:0.85em; color:#555;'>" + _url_to_domain(entry) + "</li>"
+        for entry in entries
+    )
+
+    return (
+        f'<h2>📊 Overview</h2>'
+        f'<p>Total visits: <strong>{total_visits}</strong> &nbsp;|&nbsp; '
+        f'Total active browsing time: <strong>{_format_duration(total_seconds)}</strong></p>'
+        f'<h2>🌐 All Visited Domains</h2>'
+        f'<ul>{domain_rows}</ul>'
+        f'<h2>📋 Visit Log</h2>'
+        f'<ul style="list-style:none; padding:0;">{log_rows}</ul>'
+        f'<p style="color:#aaa; font-size:0.8em; margin-top:16px;">'
+        f'AI summary unavailable — set OPENAI_API_KEY in your .env for a full digest.</p>'
+    )
+
+
 def _summarise_with_openai(entries: List[str], domain_times: dict) -> str:
     # Truncate if the log is unusually large to stay within context limits
     if len(entries) > MAX_LOG_LINES:
@@ -522,8 +554,22 @@ def run_summary():
 
     original_entry_count = len(entries)
     domain_times = parse_duration_entries(entries)
-    _log(f"Found {original_entry_count} entries. Calling OpenAI ({config.OPENAI_MODEL})...")
     today_str = date.today().strftime("%B %d, %Y")
+
+    if not config.OPENAI_API_KEY:
+        _log("No OPENAI_API_KEY configured — generating plain visit list.")
+        summary_html = _build_plain_digest_html(entries, domain_times)
+        subject = f"Your Vigil Digest — {today_str}"
+        try:
+            _send_email(subject, summary_html)
+        except Exception as exc:
+            _log(f"Email send error: {exc}")
+            return
+        _mark_sent_today()
+        _log("Plain digest sent successfully.")
+        return
+
+    _log(f"Found {original_entry_count} entries. Calling OpenAI ({config.OPENAI_MODEL})...")
     try:
         summary_html = _summarise_with_openai(entries, domain_times)
     except Exception as exc:

@@ -17,7 +17,7 @@ def _require(name: str) -> str:
         )
     return value
 
-OPENAI_API_KEY: str = _require("OPENAI_API_KEY")
+OPENAI_API_KEY: str = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL: str = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 # ---------------------------------------------------------------------------

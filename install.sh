@@ -200,7 +200,7 @@ PYEOF
     read -r -p "  OpenAI Model [${cur}]: " val
     _write_env "OPENAI_MODEL" "${val:-${cur}}"
 
-    read -r -s -p "  OpenAI API Key (leave blank to keep current): " val; echo ""
+    read -r -s -p "  OpenAI API Key (optional — leave blank for plain visit list digest, or to keep current): " val; echo ""
     [[ -n "$val" ]] && _write_env "OPENAI_API_KEY" "$val"
 
     echo ""
@@ -410,7 +410,7 @@ PYEOF
 # Create .env from template if missing
 [[ ! -f "$ENV_FILE" ]] && cp "$ENV_TEMPLATE" "$ENV_FILE"
 
-REQUIRED_VARS=(OPENAI_API_KEY SMTP_HOST SMTP_USER SMTP_PASS SMTP_TO)
+REQUIRED_VARS=(SMTP_HOST SMTP_USER SMTP_PASS SMTP_TO)
 MISSING_VARS=()
 for var in "${REQUIRED_VARS[@]}"; do
     val=$(read_env_value "$var")
@@ -429,7 +429,8 @@ if [[ ${#MISSING_VARS[@]} -gt 0 ]]; then
     for var in "${MISSING_VARS[@]}"; do
         case "$var" in
             OPENAI_API_KEY)
-                echo -e "  ${CYAN}OpenAI API key${NC}"
+                echo -e "  ${CYAN}OpenAI API key${NC} ${YELLOW}(optional)${NC}"
+                echo "  Leave blank to receive a plain visit list instead of an AI summary."
                 echo "  → https://platform.openai.com/api-keys"
                 ;;
             SMTP_HOST)
@@ -544,19 +545,23 @@ esac
 
 # ── Pre-flight credential validation ──────────────────────────────────────
 if [[ "$REINSTALL" == false ]]; then
-step "Validating API credentials..."
+step "Validating credentials..."
 
-OPENAI_HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
-    -H "Authorization: Bearer ${OPENAI_API_KEY}" \
-    "https://api.openai.com/v1/models" 2>/dev/null || echo "000")
-# 200 = valid; 403 = valid key but account/project restricted on this endpoint;
-# 429 = valid key, rate limited — all mean the key itself is accepted.
-if [[ "$OPENAI_HTTP" == "200" || "$OPENAI_HTTP" == "403" || "$OPENAI_HTTP" == "429" ]]; then
-    info "OpenAI API key valid ✓"
-elif [[ "$OPENAI_HTTP" == "401" ]]; then
-    error "OpenAI API key is invalid (HTTP 401). Update OPENAI_API_KEY in .env and re-run."
+if [[ -n "$OPENAI_API_KEY" ]]; then
+    OPENAI_HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
+        -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+        "https://api.openai.com/v1/models" 2>/dev/null || echo "000")
+    # 200 = valid; 403 = valid key but account/project restricted on this endpoint;
+    # 429 = valid key, rate limited — all mean the key itself is accepted.
+    if [[ "$OPENAI_HTTP" == "200" || "$OPENAI_HTTP" == "403" || "$OPENAI_HTTP" == "429" ]]; then
+        info "OpenAI API key valid ✓"
+    elif [[ "$OPENAI_HTTP" == "401" ]]; then
+        error "OpenAI API key is invalid (HTTP 401). Update OPENAI_API_KEY in .env and re-run."
+    else
+        warn "Could not verify OpenAI API key (HTTP ${OPENAI_HTTP}) — check your internet connection."
+    fi
 else
-    warn "Could not verify OpenAI API key (HTTP ${OPENAI_HTTP}) — check your internet connection."
+    info "No OpenAI API key set — digests will be sent as a plain visit list (no AI summary)."
 fi
 
 # Test SMTP credentials by connecting and authenticating (no email sent)
@@ -695,7 +700,7 @@ step "Sending confirmation email..."
 if "$PYTHON_PATH" "$SCRIPT_DIR/summarizer.py" --confirm; then
     info "Confirmation email sent to ${SMTP_TO} ✓"
 else
-    warn "Confirmation email failed — check your MailerSend / OpenAI credentials."
+    warn "Confirmation email failed — check your SMTP credentials."
     warn "The services are still running; this does not affect normal operation."
 fi
 
