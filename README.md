@@ -1,69 +1,78 @@
 # Vigil
 
-> **🧪 Experimental** — this is an early-stage project. Expect rough edges, and please report any issues you run into.
+> **🧪 Experimental** — this is an early-stage project. Things may break. Please report any issues you find.
 
-> **⚠️ macOS only (for now)** — this tool currently uses AppleScript, launchd, and macOS-specific APIs. It does not run on Windows or Linux. **Windows and Linux support is a work in progress.**
+> **⚠️ macOS only for now** — Windows and Linux support is coming.
 
-A macOS background service that tracks your daily web browsing across all major browsers, uses **OpenAI** to write a plain-English summary of what you visited, and emails it to you (and optionally a trusted friend) on a schedule you choose — hourly, daily, weekly, or monthly. It also sends an **instant email alert** the moment an adult or harmful site is opened, so your accountability partner is notified right away — not hours later.
+Vigil runs quietly in the background on your Mac. It watches which websites you visit — in both normal and private/incognito browser windows — and emails a summary to you and a trusted friend on a schedule you pick. If a pornographic site is opened, an alert email goes out straight away.
 
 ---
 
-## 🎯 Purpose & Why This Exists
+## 🎯 Why This Exists
 
-Most people don't realise how much time they spend on harmful or unproductive websites until they see it written down. Vigil makes your browsing visible — to yourself, or to someone you trust.
+Vigil is for people who want to break a pornography habit. It brings your browsing into the open — so you're not fighting it alone, in secret.
 
-### Personal productivity
-Get a daily summary of where your time actually went online. Real sites, real categories, real times — no guessing. Use it to spot bad habits and gradually improve them.
+### Why the name "Vigil"
 
-### A consent-based accountability system
+A vigil means keeping watch — staying alert through the night so nothing slips by. That's what this tool does. It watches quietly in the background so you don't have to face this alone. The name also reflects the role of your accountability partner — not a warden, but a trusted person who is *with you* in the fight.
 
-> **This tool only works with full consent.** It must be installed by the person being monitored — no one else. Installing it on someone's device without them knowing is a serious breach of trust and is likely illegal. Vigil is a tool for honest, mutual support — not spying.
+### Why porn is so hard to quit
 
-If you're trying to cut back on pornography, gambling, social media, or any other harmful browsing habit, the hardest part isn't knowing what to stop — it's staying honest when no one is watching. That's where accountability helps.
+Most people try to quit by willpower alone. It rarely works. Here's why:
 
-#### Why accountability works
+- **Winning once doesn't mean it's over.** Even people who have successfully stopped watching pornography can find that the memories come back without warning. Old images can pop into the mind at any time and create a sudden, strong urge to relapse. As one source puts it: *"Pornographic images or thoughts can stay in a person's mind for a long time. They can reappear without warning."* Staying accountable — even after a period of success — is what keeps those moments from turning back into a habit.
+- **It changes how your brain works.** Pornography floods the brain with dopamine — the chemical that makes things feel good. Over time the brain gets wired to crave it, just like a drug. Images can leave a lasting imprint that is very hard to erase.
+- **Hiding it makes it stronger.** Most people keep the habit secret out of shame. But secrecy is what keeps it alive. The more hidden it stays, the harder it is to break.
+- **Shame pulls you back in.** After a slip, many people feel guilty and worthless. Those feelings don't help — they often push people right back to pornography as a way to feel better, creating a cycle.
+- **You can't beat it alone.** One person put it simply: *"You think you can beat it by yourself. But that is not true. You can beat it only with help."*
 
-- **You can't hide from what's written down.** It's easy to brush off a bad habit in your head. It's harder when you can see exactly what sites you visited and for how long — and when someone you respect will see it too.
-- **A trusted person keeps you honest.** This isn't about punishment. It's about having someone in your corner who you don't want to let down. That feeling alone can stop a bad moment from turning into a bad habit.
-- **Instant alerts stop things early.** Most tools only show you what happened yesterday. Vigil emails your partner the moment a harmful site is opened — which means a slip can be caught and talked about right away, before it becomes a pattern.
-- **Honesty beats shame.** When you've agreed to share your browsing openly, a slip becomes something you talk about — not something you hide. That's a much healthier way to make progress.
-- **You're in control.** You install it yourself, you configure it yourself, and you can remove it any time. Accountability that you choose works far better than accountability forced on you.
+### How Vigil helps
 
-#### How it works
+- **It removes the hiding place — even in private mode.** Vigil tracks both normal and private/incognito browsing. There are no blind spots. When you know someone will see your activity, the private space where the habit lives disappears.
+- **It turns shame into a conversation.** When your partner already knows — because Vigil told them — a slip becomes something you talk about together, not something you carry alone.
+- **It acts fast.** Most tools only show you what happened yesterday. Vigil sends your partner an alert the moment a pornographic site is opened. That means a slip can be caught and talked about right away, before it turns into a longer session.
+- **It shows your progress clearly.** The regular digest shows how often slips happen, whether things are getting better, and when temptation tends to hit. Seeing that in writing is hard to argue with.
 
-You install Vigil on your own computer. Your browsing summary gets emailed to you and your accountability partner on a regular schedule. If you visit an adult or harmful site, an alert email goes out straight away — your partner doesn't have to wait for the next digest. You then talk about it together, honestly. No surveillance, no judgment — just two people working toward the same goal.
+### Built on consent
+
+> **This only works if you set it up yourself.** Vigil must be installed by the person being monitored — no one else. Putting it on someone's computer without their knowledge is a serious breach of trust and is likely illegal. This is a tool for mutual support, not spying.
+
+You choose to install it. You choose your partner. You can remove it any time. Accountability you choose for yourself works far better than accountability forced on you.
+
+### How it works
+
+You install Vigil on your own computer. It watches your browsing in the background. On a schedule you set, it emails a summary of what you visited to you and your accountability partner. If you visit a pornographic site at any point, an alert goes out immediately — your partner doesn't have to wait. Then you talk about it together, honestly.
 
 ---
 
 ## ✨ Features
 
-- 🌐 **Multi-browser support** — full URL capture from Safari, Chrome, Edge, Brave, and Arc (including private/incognito windows); window-title fallback for Firefox, Opera, and Tor Browser. See the [Supported Browsers](#-supported-browsers) table for details.
-- 🤖 **AI-powered digest** — OpenAI (`gpt-4o-mini` by default) categorises your activity, surfaces top domains, highlights notable browsing sessions, and **explicitly flags** any adult, gambling, or self-harm content
-- 📧 **Email delivery** — sends a clean HTML email via SMTP (no third-party service required) with Overview, Top Domains, Categories, Timeline Highlights, and Concern Flags sections
-- 🚨 **Live alert emails** — `alerter.py` detects adult/harmful sites in real time (offline, using a domain blocklist + keyword matching) and fires an immediate SMTP alert email the moment a match is found — no waiting for the next digest. A per-domain cooldown prevents alert spam.
-- ⏰ **Flexible schedule** — `hourly`, `daily`, `weekly`, or `monthly` digest controlled entirely by environment variables (powered by APScheduler)
-- 🚀 **Runs as a macOS daemon** — both the tracker and summariser are managed by launchd: auto-start on login, auto-restart on crash
-- 🛡️ **Tamper detection** — a SHA-256 checksum sidecar file is updated on every log write; the summariser alerts if the log has been modified between writes
-- 👁️ **Watchdog** — the summariser checks every 5 minutes that the tracker service is still running, and sends an immediate alert if it has been stopped
-- 🔐 **Privacy-preserving AI** — only domain names (not full URLs or paths) are sent to OpenAI; complete URLs remain on the local machine only
-- **Secrets via env vars** — no credentials ever hardcoded; all keys live in `.env` and are loaded at runtime by the Python services. API keys are **not** embedded in the launchd plist files in `~/Library/LaunchAgents/`.
+- 🌐 **All major browsers** — sees full URLs in Safari, Chrome, Edge, Brave, and Arc, including private/incognito windows. Falls back to page title for Firefox, Opera, and Tor Browser. See [Supported Browsers](#-supported-browsers).
+- 🚨 **Instant alert emails** — the moment a pornographic site is detected, an alert email is sent. No waiting for the next summary. A cooldown prevents repeat alerts for the same site.
+- 🤖 **AI summary** — OpenAI reads your browsing log and writes a plain-English digest: top sites, categories, time spent, and any pornographic content flagged clearly.
+- 📧 **Email reports** — clean HTML email sent via your own email account (Gmail, Outlook, iCloud, etc.). No third-party service needed.
+- ⏰ **Flexible schedule** — send reports hourly, daily, weekly, or monthly. You control the timing.
+- 🚀 **Always running** — Vigil starts automatically when you log in and restarts itself if it crashes.
+- 🛡️ **Tamper detection** — if the browsing log is edited, Vigil notices and sends an alert before the next summary goes out.
+- 👁️ **Watchdog** — if the tracking service is stopped, an alert email is sent immediately.
+- 🔐 **Private AI** — only website names (e.g. `youtube.com`) are sent to OpenAI. Full URLs never leave your computer.
 
 ---
 
 ## 🌐 Supported Browsers
 
-| Browser | URL capture | Private / Incognito |
+| Browser | Tracks full URL | Private / Incognito |
 |---|---|---|
-| Safari | ✅ Full URL (AppleScript `current tab`) | ✅ Yes |
-| Google Chrome | ✅ Full URL (AppleScript `active tab`) | ✅ Yes |
-| Microsoft Edge | ✅ Full URL (AppleScript `active tab`) | ✅ Yes |
-| Brave | ✅ Full URL (AppleScript `active tab`) | ✅ Yes |
-| Arc | ✅ Full URL (AppleScript `active tab`) | ✅ Yes |
-| Firefox | ⚠️ Window title only (no AppleScript URL access) | ⚠️ Title only |
-| Opera | ⚠️ Window title only (no AppleScript URL access) | ⚠️ Title only |
-| Tor Browser | ⚠️ Window title only (no AppleScript URL access) | ⚠️ Title only |
+| Safari | ✅ Yes | ✅ Yes |
+| Google Chrome | ✅ Yes | ✅ Yes |
+| Microsoft Edge | ✅ Yes | ✅ Yes |
+| Brave | ✅ Yes | ✅ Yes |
+| Arc | ✅ Yes | ✅ Yes |
+| Firefox | ⚠️ Page title only | ⚠️ Title only |
+| Opera | ⚠️ Page title only | ⚠️ Title only |
+| Tor Browser | ⚠️ Page title only | ⚠️ Title only |
 
-> **Full URL capture** requires Automation permission for that browser in **System Settings → Privacy & Security → Automation**. Browsers with window-title fallback are still tracked, but domain-level detail and AI categorisation will be less accurate.
+> Browsers marked ⚠️ are still tracked, but with less detail. For best results, use one of the ✅ browsers.
 
 ---
 
@@ -71,119 +80,113 @@ You install Vigil on your own computer. Your browsing summary gets emailed to yo
 
 ```
 personal_tracker/
-├── tracker.py                          # Browser polling daemon (AppleScript + Python)
-├── summarizer.py                       # Long-running scheduler daemon (APScheduler + OpenAI)
-├── alerter.py                          # Real-time adult/harmful site detection and live email alerts
-├── config.py                           # Environment variable loader
-├── requirements.txt                    # Python dependencies
-├── com.vigil.tracker.plist               # launchd template — tracker service
-├── com.vigil.summarizer.plist           # launchd template — summariser service
-├── install.sh                          # One-command install script
-├── uninstall.sh                        # One-command uninstall script
-├── .env.template                       # Configuration template (copy to .env)
+├── tracker.py                  # Watches your browser tabs every few seconds
+├── summarizer.py               # Sends the scheduled digest emails
+├── alerter.py                  # Sends instant alerts when a porn site is detected
+├── config.py                   # Reads settings from your .env file
+├── requirements.txt            # Python packages needed
+├── com.vigil.tracker.plist     # Keeps tracker.py running in the background
+├── com.vigil.summarizer.plist  # Keeps summarizer.py running in the background
+├── install.sh                  # One-command setup
+├── uninstall.sh                # One-command removal
+├── .env.template               # Settings template — copy to .env and fill in
 ├── data/
-│   └── adult_domains.txt               # Offline blocklist used by alerter.py
-├── detailed_activity_log.txt.sha256    # Tamper-detection checksum (auto-generated)
+│   └── adult_domains.txt       # List of known porn sites used for instant alerts
 └── tests/
-    ├── conftest.py                     # Shared pytest fixtures and env stubs
-    ├── test_tracker.py                 # Tests for tracker.py logic
-    └── test_summarizer.py              # Tests for summarizer.py logic
+    ├── conftest.py
+    ├── test_tracker.py
+    └── test_summarizer.py
 ```
 
 ---
 
-## ✅ Prerequisites
+## ✅ Before You Install
 
-Complete **all** of the following before running `install.sh`.
+You need all of the following before running `install.sh`.
 
 ### 1. macOS version
 
-| macOS Version | Status | Notes |
-|---|---|---|
-| 15 Sequoia (2024) | ✅ Fully supported | Uses `launchctl bootstrap/bootout` |
-| 14 Sonoma (2023) | ✅ Fully supported | Uses `launchctl bootstrap/bootout` |
-| 13 Ventura (2022) | ✅ Fully supported | Uses `launchctl bootstrap/bootout` |
-| 12 Monterey (2021) | ✅ Fully supported | |
-| 11 Big Sur (2020) | ✅ Fully supported | |
-| 10.15 Catalina (2019) | ✅ Minimum supported | |
-| 10.14 Mojave or earlier | ❌ Not supported | Automation privacy permissions not enforced; AppleScript behaviour differs |
+| macOS Version | Supported |
+|---|---|
+| 15 Sequoia | ✅ Yes |
+| 14 Sonoma | ✅ Yes |
+| 13 Ventura | ✅ Yes |
+| 12 Monterey | ✅ Yes |
+| 11 Big Sur | ✅ Yes |
+| 10.15 Catalina | ✅ Yes (minimum) |
+| 10.14 Mojave or older | ❌ No |
 
-The `install.sh` script automatically uses the correct launchctl commands for your macOS version (`bootstrap`/`bootout` on macOS 13+, `load`/`unload` on older versions). No manual commands needed.
-
-### 2. Python 3.8+
+### 2. Python 3.8 or newer
 
 ```bash
-python3 --version   # must be 3.8 or higher
+python3 --version
 ```
 
-Install via [Homebrew](https://brew.sh) if needed:
+If you don't have it, install via Homebrew:
 
 ```bash
 brew install python
 ```
 
-### 3. Accessibility & Automation permissions
+### 3. Allow browser access
 
-The tracker uses AppleScript to read browser tabs — including private/incognito windows. These permissions are required on **macOS 10.15 Catalina and later**.
+Vigil uses macOS Automation to read your browser tabs (including private windows). You need to allow this in your Mac's settings.
 
-On **macOS 13 Ventura and later** (System Settings):
-> **System Settings → Privacy & Security → Accessibility** — add Terminal
-> **System Settings → Privacy & Security → Automation** — allow Terminal to control Safari, Chrome, etc.
+**macOS 13 and later (System Settings):**
+- System Settings → Privacy & Security → Accessibility → add Terminal
+- System Settings → Privacy & Security → Automation → allow Terminal to control your browsers
 
-On **macOS 10.15–12 Monterey** (System Preferences):
-> **System Preferences → Security & Privacy → Privacy → Accessibility** — add Terminal
-> **System Preferences → Security & Privacy → Privacy → Automation** — allow Terminal to control browsers
+**macOS 10.15–12 (System Preferences):**
+- System Preferences → Security & Privacy → Privacy → Accessibility → add Terminal
+- System Preferences → Security & Privacy → Privacy → Automation → allow Terminal to control your browsers
 
 ### 4. OpenAI API key
 
-1. Sign up at [platform.openai.com](https://platform.openai.com)
-2. Create an API key at **API Keys → Create new secret key**
-3. Ensure your account has billing enabled (gpt-4o-mini is very cheap — ~$0.001 per digest)
+1. Sign up at platform.openai.com
+2. Create an API key under **API Keys**
+3. Make sure billing is enabled (costs roughly $0.001 per digest)
 
-### 5. SMTP email credentials
+### 5. Email account (SMTP)
 
-Vigil sends emails using standard SMTP — no third-party account or API key required beyond your existing email provider.
+Vigil sends emails using your existing email account. No extra service needed.
 
-| Provider | SMTP host | Port |
+| Provider | SMTP address | Port |
 |---|---|---|
 | Gmail | `smtp.gmail.com` | 587 |
 | Outlook / Microsoft 365 | `smtp.office365.com` | 587 |
 | Fastmail | `smtp.fastmail.com` | 587 |
 | Apple iCloud | `smtp.mail.me.com` | 587 |
-| Any provider | check your provider's SMTP settings | 587 or 465 |
 
-> **Gmail users:** standard passwords won't work — you must create an **App Password** at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords). Enable 2-Step Verification first if you haven't already.
+> **Gmail users:** you need an App Password, not your normal password. Go to myaccount.google.com/apppasswords to create one. You'll need 2-Step Verification enabled first.
 
-### 6. Configure `.env`
+### 6. Fill in your settings
 
-The `install.sh` wizard will prompt for all required values and write `.env` for you. If you prefer to configure it manually:
+`install.sh` will ask you for all of this interactively. Or do it manually:
 
 ```bash
 cp .env.template .env
 ```
 
-Open `.env` and fill in your values:
-
-| Variable | Description |
+| Setting | What it does |
 |---|---|
-| `OPENAI_API_KEY` | Your OpenAI secret key |
-| `OPENAI_MODEL` | Model to use (default: `gpt-4o-mini`) |
-| `SMTP_HOST` | SMTP server hostname (e.g. `smtp.gmail.com`) |
-| `SMTP_PORT` | SMTP port (default: `587` for STARTTLS, or `465` for SSL) |
-| `SMTP_USER` | SMTP login username (usually your full email address) |
-| `SMTP_PASS` | SMTP password or app password |
-| `SMTP_FROM` | Sender address (optional — defaults to `SMTP_USER`) |
-| `SMTP_TO` | Recipient email(s) — comma-separated for multiple (e.g. user and accountability partner) |
-| `SUMMARY_SCHEDULE` | `hourly` \| `daily` \| `weekly` \| `monthly` |
+| `OPENAI_API_KEY` | Your OpenAI key |
+| `OPENAI_MODEL` | AI model to use (default: `gpt-4o-mini`) |
+| `SMTP_HOST` | Your email provider's SMTP address |
+| `SMTP_PORT` | Port — usually `587` |
+| `SMTP_USER` | Your email address |
+| `SMTP_PASS` | Your email password or app password |
+| `SMTP_FROM` | Who the email is from (defaults to `SMTP_USER`) |
+| `SMTP_TO` | Who gets the emails — separate multiple addresses with a comma |
+| `SUMMARY_SCHEDULE` | `hourly` / `daily` / `weekly` / `monthly` |
 | `SUMMARY_SCHEDULE_HOUR` | Hour to send (0–23, default `21`) |
 | `SUMMARY_SCHEDULE_MINUTE` | Minute to send (0–59, default `0`) |
 | `SUMMARY_SCHEDULE_WEEKDAY` | For weekly: `mon`–`sun` (default `mon`) |
-| `SUMMARY_SCHEDULE_DAY` | For monthly: day of month 1–28 (default `1`) |
-| `ADULT_ALERT_ENABLED` | Enable real-time adult content detection (`true` / `false`, default `true`) |
-| `ADULT_ALERT_EMAIL` | Send a live alert email when an adult site is detected (`true` / `false`, default `true`) |
-| `ADULT_ALERT_COOLDOWN_MINUTES` | Minutes before the same domain can trigger another alert — prevents spam (default `30`) |
+| `SUMMARY_SCHEDULE_DAY` | For monthly: day 1–28 (default `1`) |
+| `ADULT_ALERT_ENABLED` | Turn instant alerts on/off (`true` / `false`, default `true`) |
+| `ADULT_ALERT_EMAIL` | Send alert emails (`true` / `false`, default `true`) |
+| `ADULT_ALERT_COOLDOWN_MINUTES` | How long before the same site can trigger another alert (default `30`) |
 
-> **Accountability partner tip:** Add both your email and your partner's email to `SMTP_TO`, separated by a comma. Both will receive every scheduled digest *and* every live alert email the moment an adult or harmful site is detected.
+> **Tip:** Put both your email and your partner's email in `SMTP_TO` separated by a comma. Both will get every digest and every instant alert.
 
 **Schedule examples:**
 
@@ -191,10 +194,6 @@ Open `.env` and fill in your values:
 # Every day at 9 PM
 SUMMARY_SCHEDULE=daily
 SUMMARY_SCHEDULE_HOUR=21
-
-# Every hour at :30
-SUMMARY_SCHEDULE=hourly
-SUMMARY_SCHEDULE_MINUTE=30
 
 # Every Monday at 8 AM
 SUMMARY_SCHEDULE=weekly
@@ -215,24 +214,22 @@ SUMMARY_SCHEDULE_HOUR=9
 bash install.sh
 ```
 
-The installer will:
-1. Check prerequisites (macOS, Python 3.8+, pip, required files)
-2. **Prompt for any missing API keys** — no manual `.env` editing needed
-3. **Validate your credentials** against the OpenAI API and your SMTP server before proceeding
-4. **Remind you to grant macOS permissions** and offer to open System Settings directly
-5. Install Python dependencies (`pip install -r requirements.txt`)
-6. Install and start both launchd services (using the correct commands for your macOS version)
-7. Send a confirmation email with your configuration summary
+This will:
+1. Check that everything is in place (macOS version, Python, required files)
+2. Ask for any missing credentials
+3. Test your OpenAI key and email settings before doing anything
+4. Prompt you to grant the required macOS permissions (and offer to open Settings for you)
+5. Install Python packages
+6. Start both background services
+7. Send a test email to confirm it's all working
 
-> **Already installed?** Re-run `bash install.sh` any time to update credentials or re-register services after moving the project directory.
+> Already installed? Run `bash install.sh` again any time to update your settings or restart the services.
 
-### Check service health
+### Check if it's running
 
 ```bash
 bash install.sh --status
 ```
-
-Shows whether each service is running, and tails the last few lines of each log file.
 
 ---
 
@@ -242,80 +239,69 @@ Shows whether each service is running, and tails the last few lines of each log 
 bash uninstall.sh
 ```
 
-You will be prompted whether to also delete log files and your `.env`.
+You'll be asked whether to also delete your log files and settings.
 
 ---
 
-## 📄 Logs
+## 📄 Log Files
 
-| File | Contents |
+| File | What's in it |
 |---|---|
-| `tracker_daemon.log` | Tracker start/stop and polling events |
-| `tracker_stderr.log` | Tracker errors (from launchd) |
-| `summarizer_daemon.log` | Schedule triggers, OpenAI calls, email status, watchdog events |
-| `summarizer_stderr.log` | Summariser errors (from launchd) |
-| `detailed_activity_log.txt` | Raw browsing log (timestamped URLs) |
-| `detailed_activity_log.txt.sha256` | Tamper-detection checksum (auto-generated) |
+| `tracker_daemon.log` | When the tracker started, stopped, and what it polled |
+| `tracker_stderr.log` | Tracker error messages |
+| `summarizer_daemon.log` | When emails were sent, OpenAI calls, watchdog checks |
+| `summarizer_stderr.log` | Summariser error messages |
+| `detailed_activity_log.txt` | Full browsing log with timestamps |
+| `detailed_activity_log.txt.sha256` | Tamper-detection file (auto-generated) |
 
 ---
 
-## 🔐 Privacy & Security
+## 🔐 Privacy
 
-- **What is stored locally:** Full timestamped URLs in `detailed_activity_log.txt`. This file stays on the machine.
-- **What is sent to OpenAI:** Domain names only (e.g. `youtube.com`) — never full URLs, paths, or query strings.
-- **What is sent via email:** The AI-generated digest summary, which includes domain names and categories.
-- **Tamper detection:** A SHA-256 checksum of the log is updated on every write. If the log is edited between writes, the summariser will detect it and alert before sending the digest.
-- **Watchdog:** An alert email is sent immediately if the tracking service is stopped.
+- **Stored on your computer:** Full URLs with timestamps. Never leaves your machine.
+- **Sent to OpenAI:** Website names only (e.g. `youtube.com`). No full URLs, no page titles, no search terms.
+- **Sent by email:** The AI-written summary, which includes site names and categories.
+- **Tamper detection:** If anyone edits the log file, Vigil detects it and sends an alert before the next digest.
+- **Watchdog:** If the tracker is stopped, an alert email goes out immediately.
 
-> Keep your `.env` and log files secure. Do not commit them to version control — both are covered by `.gitignore`.
+> Keep your `.env` file private. Do not commit it to version control — it's already in `.gitignore`.
 
 ---
 
-## 🧪 Testing
-
-The test suite covers all pure-logic functions in `tracker.py` and `summarizer.py`. No real log files, SMTP servers, or OpenAI API calls are made — all file I/O is redirected to temporary directories via pytest fixtures.
-
-### Run the tests
+## 🧪 Tests
 
 ```bash
 .venv/bin/pytest tests/ -v
 ```
 
-### What is tested
+No real browsing data, email accounts, or OpenAI calls are used in tests — everything runs against temporary files.
 
-| File | Test class | What it covers |
-|---|---|---|
-| `tracker.py` | `TestUpdateIntegrityHash` | SHA-256 sidecar written correctly; no-op when log is absent |
-| `tracker.py` | `TestLogDurationEntry` | Entry format, timestamp pattern, hash updated on write |
-| `tracker.py` | `TestFinalizeSession` | Basic duration, idle gap excluded, open idle counted, short sessions discarded |
-| `tracker.py` | `TestGetLastLogTime` | Parses last-line timestamp; handles empty file, missing file, unparseable line |
-| `tracker.py` | `TestCheckForShutdownEvent` | Logs shutdown event when boot time is after last activity; no-op otherwise |
-| `tracker.py` | `TestGetActiveTabAppleScript` | Script contains Safari block and System Events block |
-| `summarizer.py` | `TestCleanupOldEntries` | Removes old entries, keeps recent ones, keeps undated lines (SYSTEM EVENT), no-op for zero-day retention, atomic write, hash refresh, no temp file left behind |
-| `summarizer.py` | `TestStripToDomain` | Full URLs stripped to domain; timestamps and durations preserved |
-| `summarizer.py` | `TestParseDurationEntries` | Accumulates time per domain; ignores undated lines |
-| `summarizer.py` | `TestFormatDuration` | Seconds → `30s`, `1m`, `1h`, `1h 1m` (parametrised) |
-| `summarizer.py` | `TestBuildTimePerDomainHtml` | Top-5 cap, empty input, total time displayed |
-| `summarizer.py` | `TestHtmlToText` | Tags stripped, excess whitespace collapsed |
-| `summarizer.py` | `TestSentinelFile` | Today/yesterday/missing sentinel; `_mark_sent_today` round-trip |
-| `summarizer.py` | `TestVerifyLogIntegrity` | Valid hash passes, tampered log fails, missing files treated as valid |
-
-### Adding tests
-
-`tests/conftest.py` stubs all required environment variables so `config.py` can be imported without a real `.env`. Use the `log_env` and `sentinel_env` fixtures (defined in `test_summarizer.py`) to redirect file paths to `tmp_path` and keep tests hermetic.
-
----
-
-
+| File | What is tested |
+|---|---|
+| `tracker.py` | Log writing, timestamps, hash updates, session detection, shutdown events, AppleScript generation |
+| `summarizer.py` | Log cleanup, domain parsing, time totals, email formatting, tamper detection, digest scheduling |
 
 ---
 
 ## 🔧 Tech Stack
 
-| Component | Library / Service | macOS requirement |
-|---|---|---|
-| Browser polling | AppleScript via `subprocess` | 10.15 Catalina+ (Automation permission) |
-| Scheduling | [APScheduler](https://apscheduler.readthedocs.io/) | — |
-| AI summarisation | [OpenAI Python SDK](https://github.com/openai/openai-python) | — |
-| Email delivery | SMTP via Python `smtplib` (stdlib — no extra package) | — |
-| macOS daemon | launchd (`~/Library/LaunchAgents/`) | 10.15 Catalina+ (`bootstrap`/`bootout` on 13+, `load`/`unload` on older) |
+| Part | Tool |
+|---|---|
+| Browser watching | AppleScript via Python `subprocess` |
+| Scheduling | APScheduler |
+| AI summaries | OpenAI Python SDK |
+| Email | Python `smtplib` (built-in, no extra package) |
+| Background service | macOS launchd |
+
+---
+
+## 📚 References
+
+- *Pornography — Harmless or Toxic?* — jw.org: https://www.jw.org/en/library/magazines/wp20130801/is-pornography-harmful/
+- *Pornography — A Dangerous Trap* — jw.org: https://www.jw.org/en/library/magazines/watchtower-study-june-2019/pornography-a-dangerous-trap/
+- OpenAI Platform: https://platform.openai.com
+- APScheduler docs: https://apscheduler.readthedocs.io/
+- OpenAI Python SDK: https://github.com/openai/openai-python
+- Homebrew: https://brew.sh
+- Gmail App Passwords: https://myaccount.google.com/apppasswords
+
