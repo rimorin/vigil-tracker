@@ -192,14 +192,14 @@ class TestCheckUrlDispatch:
 
     def test_email_disabled(self, monkeypatch):
         import config
-        monkeypatch.setattr(config, "ADULT_ALERT_EMAIL", False)
+        monkeypatch.setattr(config, "ALERT_EMAIL", False)
         with patch.object(self.alerter, "_send_alert_email") as mock_email:
             self.alerter.check_url("[Safari] https://adultexample.com/")
             mock_email.assert_not_called()
 
     def test_master_switch_disables_all(self, monkeypatch):
         import config
-        monkeypatch.setattr(config, "ADULT_ALERT_ENABLED", False)
+        monkeypatch.setattr(config, "ALERT_ENABLED", False)
         with patch.object(self.alerter, "_send_alert_email") as mock_email:
             self.alerter.check_url("[Safari] https://adultexample.com/")
             mock_email.assert_not_called()

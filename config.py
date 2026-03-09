@@ -17,7 +17,7 @@ def _require(name: str) -> str:
         )
     return value
 
-OPENAI_API_KEY: str = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_API_KEY: str = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL: str = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 # ---------------------------------------------------------------------------
@@ -69,8 +69,8 @@ LOG_RETENTION_DAYS: int = int(os.environ.get("LOG_RETENTION_DAYS", "30"))
 # Adult content alerts
 # ---------------------------------------------------------------------------
 # Real-time alerts fired by alerter.py whenever an adult/porn site is visited.
-ADULT_ALERT_ENABLED: bool = os.environ.get("ADULT_ALERT_ENABLED", "true").lower() == "true"
+ALERT_ENABLED: bool = os.environ.get("ALERT_ENABLED", "true").lower() == "true"
 # Minutes before the same domain can trigger another alert (prevents spam).
-ADULT_ALERT_COOLDOWN_MINUTES: int = int(os.environ.get("ADULT_ALERT_COOLDOWN_MINUTES", "30"))
+ALERT_COOLDOWN_MINUTES: int = int(os.environ.get("ALERT_COOLDOWN_MINUTES", "30"))
 # Send an alert email via the configured SMTP settings.
-ADULT_ALERT_EMAIL: bool = os.environ.get("ADULT_ALERT_EMAIL", "true").lower() == "true"
+ALERT_EMAIL: bool = os.environ.get("ALERT_EMAIL", "true").lower() == "true"

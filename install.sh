@@ -106,9 +106,9 @@ if [[ "${1:-}" == "--status" ]]; then
         esac
         echo ""
         echo -e "${BOLD}${CYAN}Adult Content Alerts${NC}"
-        echo -e "  Enabled     : ${ADULT_ALERT_ENABLED:-true}"
-        echo -e "  Cooldown    : ${ADULT_ALERT_COOLDOWN_MINUTES:-30} minutes"
-        echo -e "  Email alert : ${ADULT_ALERT_EMAIL:-true}"
+        echo -e "  Enabled     : ${ALERT_ENABLED:-true}"
+        echo -e "  Cooldown    : ${ALERT_COOLDOWN_MINUTES:-30} minutes"
+        echo -e "  Email alert : ${ALERT_EMAIL:-true}"
         echo ""
     else
         echo -e "${YELLOW}No .env file found — settings unavailable${NC}"
@@ -266,17 +266,17 @@ PYEOF
     # ── Adult Content Alerts ───────────────────────────────────────────────
     echo -e "${BOLD}${CYAN}Adult Content Alerts${NC}"
 
-    cur=$(_read_env "ADULT_ALERT_ENABLED"); cur="${cur:-${ADULT_ALERT_ENABLED:-true}}"
+    cur=$(_read_env "ALERT_ENABLED"); cur="${cur:-${ALERT_ENABLED:-true}}"
     read -r -p "  Enabled (true/false) [${cur}]: " val
-    _write_env "ADULT_ALERT_ENABLED" "${val:-${cur}}"
+    _write_env "ALERT_ENABLED" "${val:-${cur}}"
 
-    cur=$(_read_env "ADULT_ALERT_COOLDOWN_MINUTES"); cur="${cur:-${ADULT_ALERT_COOLDOWN_MINUTES:-30}}"
+    cur=$(_read_env "ALERT_COOLDOWN_MINUTES"); cur="${cur:-${ALERT_COOLDOWN_MINUTES:-30}}"
     read -r -p "  Cooldown minutes [${cur}]: " val
-    _write_env "ADULT_ALERT_COOLDOWN_MINUTES" "${val:-${cur}}"
+    _write_env "ALERT_COOLDOWN_MINUTES" "${val:-${cur}}"
 
-    cur=$(_read_env "ADULT_ALERT_EMAIL"); cur="${cur:-${ADULT_ALERT_EMAIL:-true}}"
+    cur=$(_read_env "ALERT_EMAIL"); cur="${cur:-${ALERT_EMAIL:-true}}"
     read -r -p "  Email alerts (true/false) [${cur}]: " val
-    _write_env "ADULT_ALERT_EMAIL" "${val:-${cur}}"
+    _write_env "ALERT_EMAIL" "${val:-${cur}}"
 
     echo ""
     info "Settings saved to .env ✓"
@@ -372,9 +372,9 @@ SUMMARY_SCHEDULE_INTERVAL_MINUTES=60
 # ── Adult content alerts ────────────────────────────────────────────────────
 # Real-time email alert when an adult/porn site is visited.
 # All values below are optional — defaults shown are used if not set.
-ADULT_ALERT_ENABLED=true
-ADULT_ALERT_COOLDOWN_MINUTES=30
-ADULT_ALERT_EMAIL=true
+ALERT_ENABLED=true
+ALERT_COOLDOWN_MINUTES=30
+ALERT_EMAIL=true
 EOF
 fi
 

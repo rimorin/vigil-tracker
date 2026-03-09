@@ -6,10 +6,10 @@ Called by tracker.py on every URL change.  Detection is entirely offline:
   2. Keyword matching  — adult-related substrings found in the domain name
 
 When a match is found, one or both alert channels fire (configured via .env):
-  • macOS banner notification  (ADULT_ALERT_NOTIFICATION)
-  • Alert email via SMTP        (ADULT_ALERT_EMAIL)
+  • macOS banner notification  (ALERT_NOTIFICATION)
+  • Alert email via SMTP        (ALERT_EMAIL)
 
-A per-domain cooldown (ADULT_ALERT_COOLDOWN_MINUTES) prevents alert spam.
+A per-domain cooldown (ALERT_COOLDOWN_MINUTES) prevents alert spam.
 All public functions are wrapped in broad try/except so alerter failures
 never propagate to or crash the tracker daemon.
 """
@@ -53,7 +53,7 @@ _DOMAIN_SPLIT = re.compile(r'[.\-]')
 
 # Pre-computed cooldown window in seconds (avoids timedelta object construction
 # on every call; read once at module import so config changes require restart).
-_COOLDOWN_SECS: float = config.ADULT_ALERT_COOLDOWN_MINUTES * 60
+_COOLDOWN_SECS: float = config.ALERT_COOLDOWN_MINUTES * 60
 
 # Resolved once — used in alert emails so the recipient knows which machine fired.
 _DEVICE_NAME: str = _get_device_name()
@@ -214,7 +214,7 @@ def check_url(label: str) -> None:
     Uses a pre-compiled regex to extract the hostname in a single pass,
     avoiding urllib.parse overhead on every tracker poll.  Never raises.
     """
-    if not config.ADULT_ALERT_ENABLED:
+    if not config.ALERT_ENABLED:
         return
 
     try:
@@ -234,7 +234,7 @@ def check_url(label: str) -> None:
         _record_alert(domain)
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        if config.ADULT_ALERT_EMAIL:
+        if config.ALERT_EMAIL:
             try:
                 _send_alert_email(domain, timestamp)
             except Exception:

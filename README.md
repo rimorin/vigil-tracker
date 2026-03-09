@@ -173,9 +173,9 @@ cp .env.template .env
 | `SUMMARY_SCHEDULE_MINUTE` | `0` | Minute to send (0–59) |
 | `SUMMARY_SCHEDULE_WEEKDAY` | `mon` | `mon`–`sun` (weekly only) |
 | `SUMMARY_SCHEDULE_DAY` | `1` | Day 1–28 (monthly only) |
-| `ADULT_ALERT_ENABLED` | `true` | Enable/disable instant alerts |
-| `ADULT_ALERT_EMAIL` | `true` | Send alert via email |
-| `ADULT_ALERT_COOLDOWN_MINUTES` | `30` | Minutes before the same domain alerts again |
+| `ALERT_ENABLED` | `true` | Enable/disable instant alerts |
+| `ALERT_EMAIL` | `true` | Send alert via email |
+| `ALERT_COOLDOWN_MINUTES` | `30` | Minutes before the same domain alerts again |
 
 **Schedule examples:**
 
