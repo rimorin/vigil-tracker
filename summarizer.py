@@ -25,7 +25,6 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from logging.handlers import RotatingFileHandler
 from datetime import date, datetime, timedelta
-from pathlib import Path
 from socket import gethostname
 from typing import List, Optional, Tuple
 
@@ -37,9 +36,10 @@ from tzlocal import get_localzone_name
 from openai import OpenAI
 
 import config
+from platform_common import acquire_instance_lock, get_app_dirs
 
-APP_SUPPORT_DIR = Path.home() / "Library" / "Application Support" / "Vigil"
-LOG_DIR = Path.home() / "Library" / "Logs" / "Vigil"
+
+APP_SUPPORT_DIR, LOG_DIR = get_app_dirs()
 APP_SUPPORT_DIR.mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -47,6 +47,7 @@ ACTIVITY_LOG = APP_SUPPORT_DIR / "detailed_activity_log.txt"
 INTEGRITY_FILE = APP_SUPPORT_DIR / "detailed_activity_log.txt.sha256"
 SENTINEL_FILE = APP_SUPPORT_DIR / "last_summarized_date.txt"
 SUMMARIZER_LOG = LOG_DIR / "summarizer_daemon.log"
+PID_FILE = APP_SUPPORT_DIR / "summarizer.pid"
 
 # gpt-4o-mini context window: 128k tokens. Each log line ≈ 20 tokens.
 # Cap at 3000 lines (~60k tokens) to leave room for prompt + response.
@@ -830,6 +831,7 @@ def main():
             sys.exit(1)
         return
 
+    acquire_instance_lock(PID_FILE, _logger)
     global _scheduler
     trigger, desc = _build_trigger()
     _log(f"Summarizer daemon started — schedule: {desc}")

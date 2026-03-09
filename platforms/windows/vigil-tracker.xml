@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-16"?>
+<!--
+  Windows Task Scheduler reference template for Vigil Tracker.
+
+  The installer (install.ps1) registers the task directly via PowerShell
+  cmdlets without using this file.  This template is provided for users who
+  prefer manual registration:
+
+    1. Replace __PYTHON_PATH__, __PROJECT_DIR__, and __USERNAME__ with real
+       values (e.g. C:\Python312\pythonw.exe, C:\Users\you\vigil-tracker,
+       and DOMAIN\username or just username for local accounts).
+    2. Save the file as UTF-16 LE:
+         [System.IO.File]::WriteAllText(
+             "vigil-tracker.xml", $content,
+             [System.Text.Encoding]::Unicode
+         )
+    3. Register:
+         schtasks /create /tn "Vigil Tracker" /xml "vigil-tracker.xml" /f
+-->
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Vigil browser activity tracker — logs active browser tabs every 5 seconds.</Description>
+    <Author>Vigil</Author>
+  </RegistrationInfo>
+
+  <Triggers>
+    <!-- AtLogon = equivalent to launchd RunAtLoad (user-session scope) -->
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>__USERNAME__</UserId>
+    </LogonTrigger>
+  </Triggers>
+
+  <Principals>
+    <Principal id="Author">
+      <UserId>__USERNAME__</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <!-- Start if the trigger was missed (e.g. machine was off at login time) -->
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <!-- PT0S = no execution time limit (equivalent to launchd KeepAlive) -->
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <!-- Auto-restart on crash — equivalent to launchd ThrottleInterval 10s -->
+    <RestartOnFailure>
+      <Interval>PT10S</Interval>
+      <Count>999</Count>
+    </RestartOnFailure>
+  </Settings>
+
+  <Actions Context="Author">
+    <Exec>
+      <!-- pythonw.exe suppresses the console window; fall back to python.exe if absent -->
+      <Command>__PYTHON_PATH__</Command>
+      <Arguments>"__PROJECT_DIR__\tracker.py"</Arguments>
+      <WorkingDirectory>__PROJECT_DIR__</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>

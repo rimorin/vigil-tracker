@@ -4,6 +4,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
@@ -25,7 +26,7 @@ launchctl_unload() {
 }
 
 # ── Send uninstall notification email (before stopping services / deleting .env)
-ENV_FILE="$SCRIPT_DIR/.env"
+ENV_FILE="$REPO_ROOT/.env"
 
 if [[ -f "$ENV_FILE" ]]; then
     if command -v pyenv &>/dev/null; then
@@ -39,7 +40,7 @@ if [[ -f "$ENV_FILE" ]]; then
     # shellcheck disable=SC1090
     source "$ENV_FILE"
     set +a
-    if "$PYTHON_PATH" "$SCRIPT_DIR/summarizer.py" --uninstall-notify; then
+    if "$PYTHON_PATH" "$REPO_ROOT/summarizer.py" --uninstall-notify; then
         info "Uninstall notification sent."
     else
         warn "Could not send uninstall notification — continuing with uninstall."
@@ -108,7 +109,7 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 # ── Optionally remove virtual environment ─────────────────────────────────
-VENV_DIR="$SCRIPT_DIR/.venv"
+VENV_DIR="$REPO_ROOT/.venv"
 if [[ -d "$VENV_DIR" ]]; then
     echo ""
     read -r -p "$(echo -e "${YELLOW}Delete Python virtual environment (.venv)?${NC} [y/N] ")" DELETE_VENV

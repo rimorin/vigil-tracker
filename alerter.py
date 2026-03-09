@@ -15,38 +15,52 @@ never propagate to or crash the tracker daemon.
 """
 
 import concurrent.futures
+import logging
 import re
 import smtplib
 import socket
 import ssl
-import subprocess
 import time
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Dict, FrozenSet, Optional
 
 import config
+from platform_common import get_app_dirs
+
+# ---------------------------------------------------------------------------
+# Logger — writes to the same Vigil log directory as tracker.py
+# ---------------------------------------------------------------------------
+
+_, _log_dir = get_app_dirs()
+_log_dir.mkdir(parents=True, exist_ok=True)
+_handler = RotatingFileHandler(
+    _log_dir / "alerter.log",
+    maxBytes=2 * 1024 * 1024,
+    backupCount=2,
+    encoding="utf-8",
+)
+_handler.setFormatter(logging.Formatter("[%(asctime)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+_logger = logging.getLogger("alerter")
+_logger.setLevel(logging.INFO)
+if not _logger.handlers:
+    _logger.addHandler(_handler)
 
 # Friendly device name shown in alert emails — resolved once at import time.
-def _get_device_name() -> str:
-    try:
-        result = subprocess.run(
-            ["scutil", "--get", "ComputerName"],
-            capture_output=True, text=True, timeout=5,
-        )
-        name = result.stdout.strip()
-        if name:
-            return name
-    except Exception:
-        pass
-    return socket.gethostname()
+_DEVICE_NAME: str = socket.gethostname()
 
-# Pre-compiled regex: extracts the hostname from either "[Browser] https://host/path"
-# or a raw "https://host/path" label in a single pass — avoids urllib.parse overhead.
+# Pre-compiled regex: extracts the hostname from a full URL that includes the protocol
+# (e.g. Firefox, or a raw "https://host/path" label).
 # Handles user:pass@ credentials, strips path/query/port automatically.
 _HOSTNAME_RE = re.compile(r'https?://(?:[^@/]+@)?([^/:?\s]+)')
+
+# Chrome strips https:// from the address bar value it exposes via UIA, so the
+# active label becomes "[BrowserName] host/path" with no protocol prefix.
+# This pattern captures the bare hostname from that fallback format.
+_BROWSER_BARE_RE = re.compile(r'^\[.+?\]\s+([^/?#:\s]+)')
 
 # Pre-compiled pattern — splits a domain on '.' and '-' for keyword matching.
 _DOMAIN_SPLIT = re.compile(r'[.\-]')
@@ -54,9 +68,6 @@ _DOMAIN_SPLIT = re.compile(r'[.\-]')
 # Pre-computed cooldown window in seconds (avoids timedelta object construction
 # on every call; read once at module import so config changes require restart).
 _COOLDOWN_SECS: float = config.ALERT_COOLDOWN_MINUTES * 60
-
-# Resolved once — used in alert emails so the recipient knows which machine fired.
-_DEVICE_NAME: str = _get_device_name()
 
 # ---------------------------------------------------------------------------
 # Blocklist — loaded once at import time into a set for O(1) lookup
@@ -200,8 +211,11 @@ def _send_alert_email(domain: str, timestamp: str) -> None:
         future = executor.submit(_do_send_smtp, subject, html_body, plain_text)
         try:
             future.result(timeout=60)
+            _logger.info("Alert email sent for domain: %s", domain)
         except concurrent.futures.TimeoutError:
-            pass  # Don't block or crash the tracker if SMTP hangs
+            _logger.error("Alert email timed out (>60s) for domain: %s", domain)
+        except Exception as exc:
+            _logger.error("Alert email failed for domain %s: %s: %s", domain, type(exc).__name__, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -219,9 +233,16 @@ def check_url(label: str) -> None:
 
     try:
         m = _HOSTNAME_RE.search(label)
-        if not m:
-            return
-        domain = m.group(1).lower()
+        if m:
+            raw = m.group(1)
+        else:
+            # Chrome omits https:// in the address-bar value read via UIA.
+            # Try the bare-host fallback: "[BrowserName] host/path".
+            bm = _BROWSER_BARE_RE.match(label)
+            if not bm:
+                return
+            raw = bm.group(1)
+        domain = raw.lower()
         if domain.startswith("www."):
             domain = domain[4:]
 
@@ -229,16 +250,18 @@ def check_url(label: str) -> None:
             return
 
         if _is_on_cooldown(domain):
+            _logger.info("Alert suppressed (cooldown active) for domain: %s", domain)
             return
 
         _record_alert(domain)
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        _logger.info("Adult domain detected: %s", domain)
 
         if config.ALERT_EMAIL:
             try:
                 _send_alert_email(domain, timestamp)
-            except Exception:
-                pass
+            except Exception as exc:
+                _logger.error("Unexpected error in _send_alert_email for %s: %s: %s", domain, type(exc).__name__, exc)
 
-    except Exception:
-        pass
+    except Exception as exc:
+        _logger.error("Unexpected error in check_url(%r): %s: %s", label, type(exc).__name__, exc)

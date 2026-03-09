@@ -10,9 +10,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
-ENV_FILE="$SCRIPT_DIR/.env"
-ENV_TEMPLATE="$SCRIPT_DIR/.env.template"
+ENV_FILE="$REPO_ROOT/.env"
+ENV_TEMPLATE="$REPO_ROOT/.env.template"
 
 # ── Colours ────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -337,9 +338,10 @@ info "Python $PY_VERSION ✓"
     || error "pip not available for $PYTHON_PATH. Try: $PYTHON_PATH -m ensurepip --upgrade"
 info "pip ✓"
 
-for f in requirements.txt com.vigil.tracker.plist com.vigil.summarizer.plist; do
+for f in com.vigil.tracker.plist com.vigil.summarizer.plist; do
     [[ ! -f "$SCRIPT_DIR/$f" ]] && error "Required file not found: $f"
 done
+[[ ! -f "$REPO_ROOT/requirements.txt" ]] && error "Required file not found: requirements.txt"
 info "Project files ✓  (macOS $(sw_vers -productVersion))"
 
 # ── Ensure .env.template exists ────────────────────────────────────────────
@@ -624,7 +626,7 @@ fi # end REINSTALL=false validation block
 
 # ── Set up project-local virtual environment ──────────────────────────────
 step "Setting up Python environment..."
-VENV_DIR="$SCRIPT_DIR/.venv"
+VENV_DIR="$REPO_ROOT/.venv"
 if [[ ! -d "$VENV_DIR" ]]; then
     "$PYTHON_PATH" -m venv "$VENV_DIR"
     info "Created virtual environment at .venv ✓"
@@ -634,7 +636,7 @@ fi
 # Use the venv Python for everything from here on (services, fill_plist, email)
 PYTHON_PATH="$VENV_DIR/bin/python3"
 "$PYTHON_PATH" -m pip install -q --upgrade pip
-"$PYTHON_PATH" -m pip install -q -r "$SCRIPT_DIR/requirements.txt"
+"$PYTHON_PATH" -m pip install -q -r "$REPO_ROOT/requirements.txt"
 info "Dependencies installed ✓"
 
 # ── Helper: fill plist templates ───────────────────────────────────────────
@@ -644,7 +646,7 @@ info "Dependencies installed ✓"
 fill_plist() {
     local src="$1" dst="$2"
     _PLIST_PYTHON_PATH="$PYTHON_PATH" \
-    _PLIST_PROJECT_DIR="$SCRIPT_DIR" \
+    _PLIST_PROJECT_DIR="$REPO_ROOT" \
     _PLIST_LOG_DIR="$HOME/Library/Logs/Vigil" \
     "$PYTHON_PATH" - "$src" "$dst" <<'PYEOF'
 import os, sys
@@ -665,14 +667,14 @@ mkdir -p "$HOME/Library/Logs/Vigil"
 
 # ── Migrate any existing log/data files from the repo dir ─────────────────
 for f in detailed_activity_log.txt detailed_activity_log.txt.sha256 last_summarized_date.txt; do
-    if [[ -f "$SCRIPT_DIR/$f" ]]; then
-        mv "$SCRIPT_DIR/$f" "$HOME/Library/Application Support/Vigil/$f"
+    if [[ -f "$REPO_ROOT/$f" ]]; then
+        mv "$REPO_ROOT/$f" "$HOME/Library/Application Support/Vigil/$f"
         info "Migrated $f → ~/Library/Application Support/Vigil/"
     fi
 done
 for f in tracker_daemon.log summarizer_daemon.log; do
-    if [[ -f "$SCRIPT_DIR/$f" ]]; then
-        mv "$SCRIPT_DIR/$f" "$HOME/Library/Logs/Vigil/$f"
+    if [[ -f "$REPO_ROOT/$f" ]]; then
+        mv "$REPO_ROOT/$f" "$HOME/Library/Logs/Vigil/$f"
         info "Migrated $f → ~/Library/Logs/Vigil/"
     fi
 done
@@ -697,7 +699,7 @@ info "Summarizer service installed (com.vigil.summarizer) — schedule: ${SUMMAR
 
 # ── Send confirmation email ────────────────────────────────────────────────
 step "Sending confirmation email..."
-if "$PYTHON_PATH" "$SCRIPT_DIR/summarizer.py" --confirm; then
+if "$PYTHON_PATH" "$REPO_ROOT/summarizer.py" --confirm; then
     info "Confirmation email sent to ${SMTP_TO} ✓"
 else
     warn "Confirmation email failed — check your SMTP credentials."

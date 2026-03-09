@@ -2,9 +2,7 @@
 
 > **🧪 Experimental** — early-stage project. Things may break. Please report any issues you find.
 
-> **⚠️ macOS only** — Windows and Linux support is coming.
-
-Vigil runs quietly in the background on your Mac. It watches which websites you visit — in both normal and private/incognito windows — and emails a digest to you and a trusted friend on a schedule you choose. If a pornographic site is opened, an alert goes out immediately.
+Vigil runs quietly in the background on your computer. It watches which websites you visit — in both normal and private/incognito windows — and emails a digest to you and a trusted friend on a schedule you choose. If a pornographic site is opened, an alert goes out immediately.
 
 ---
 
@@ -38,12 +36,12 @@ You choose to install it. You choose your partner. You can remove it any time.
 
 ## ✨ Features
 
-- 🌐 **All major browsers** — full URLs in Safari, Chrome, Edge, Brave, and Arc, including private/incognito. Falls back to page title for Firefox, Opera, and Tor. See [Supported Browsers](#-supported-browsers).
+- 🌐 **All major browsers** — full URLs in Safari, Chrome, Edge, Brave, and Arc on macOS; Chrome, Edge, Brave, Firefox and more on Windows. See [Supported Browsers](#-supported-browsers).
 - 🚨 **Instant alerts** — alert email sent the moment a pornographic site is detected, with a configurable cooldown per domain.
 - 🤖 **AI digest** *(optional)* — with an OpenAI key, summaries include categories, timeline highlights, and flagged content analysis. Without one, a plain visit list (domains, time spent, full log) is sent instead — no external calls needed.
 - 📧 **Email via your own account** — standard SMTP. Gmail, Outlook, iCloud, Fastmail — any provider works.
 - ⏰ **Flexible schedule** — hourly, daily, weekly, or monthly.
-- 🚀 **Always running** — starts on login, restarts on crash via macOS launchd.
+- 🚀 **Always running** — starts on login, restarts on crash via macOS launchd or Windows Task Scheduler.
 - 🛡️ **Tamper detection** — if the log file is edited, an alert is sent before the next digest.
 - 👁️ **Watchdog** — if the tracker stops unexpectedly, an alert goes out immediately.
 - 🔐 **Private** — only domain names (e.g. `youtube.com`) are ever sent to OpenAI. Full URLs stay on your machine.
@@ -51,6 +49,8 @@ You choose to install it. You choose your partner. You can remove it any time.
 ---
 
 ## 🌐 Supported Browsers
+
+### macOS
 
 | Browser | Full URL | Private / Incognito |
 |---|---|---|
@@ -63,30 +63,57 @@ You choose to install it. You choose your partner. You can remove it any time.
 | Opera | ⚠️ Page title only | ⚠️ |
 | Tor Browser | ⚠️ Page title only | ⚠️ |
 
+### Windows
+
+| Browser | Full URL | Private / Incognito | Notes |
+|---|---|---|---|
+| Microsoft Edge | ✅ | ✅ | Best support — stable AutomationId |
+| Google Chrome | ✅ | ✅ | Chrome 138+ (mid-2025); English locale only* |
+| Brave | ✅ | ✅ | Chromium-based; same as Chrome |
+| Vivaldi | ✅ | ✅ | Chromium-based; same as Chrome |
+| Firefox | ✅ | ✅ | Via accessibility API |
+| Opera | ⚠️ Page title only | ⚠️ | Non-standard address bar |
+
 > ⚠️ browsers are still tracked, but with less detail. For best results, use a ✅ browser.
+>
+> *Chrome on Windows uses a locale-sensitive label to find the address bar. On non-English Windows, Edge is the recommended choice for full URL capture.
 
 ---
 
 ## 📁 Project Structure
 
 ```
-personal_tracker/
+vigil-tracker/
 ├── tracker.py                  # Watches browser tabs every few seconds
 ├── summarizer.py               # Sends scheduled digest emails
 ├── alerter.py                  # Sends instant alerts for porn sites
 ├── config.py                   # Reads settings from .env
+├── platform_common.py          # Shared OS path helpers
 ├── requirements.txt            # Python dependencies
-├── com.vigil.tracker.plist     # launchd config for tracker
-├── com.vigil.summarizer.plist  # launchd config for summarizer
-├── install.sh                  # One-command setup
-├── uninstall.sh                # One-command removal
+├── platforms/
+│   ├── windows/
+│   │   ├── tracker_windows.py  # Windows idle + UIA URL detection
+│   │   ├── install.bat         # Launcher (bypasses execution policy)
+│   │   ├── install.ps1         # Windows one-command setup (PowerShell)
+│   │   ├── uninstall.bat       # Uninstaller launcher
+│   │   ├── uninstall.ps1       # Windows one-command removal (PowerShell)
+│   │   ├── vigil-tracker.xml   # Task Scheduler template (tracker)
+│   │   └── vigil-summarizer.xml # Task Scheduler template (summarizer)
+│   └── macos/
+│       ├── tracker_macos.py    # macOS idle + AppleScript URL detection
+│       ├── install.sh          # macOS one-command setup
+│       ├── uninstall.sh        # macOS one-command removal
+│       ├── com.vigil.tracker.plist    # launchd config (tracker)
+│       └── com.vigil.summarizer.plist # launchd config (summarizer)
 ├── .env.template               # Settings template — copy to .env and fill in
 ├── data/
 │   └── domains.txt             # Offline blocklist for instant alerts
 └── tests/
     ├── conftest.py
     ├── test_tracker.py
-    └── test_summarizer.py
+    ├── test_summarizer.py
+    ├── test_alerter.py
+    └── test_windows.py
 ```
 
 ---
@@ -124,14 +151,16 @@ mv data/domains_clean.txt data/domains.txt
 
 ## ✅ Before You Install
 
-### 1. macOS 10.15 Catalina or newer
+### macOS requirements
+
+#### 1. macOS 10.15 Catalina or newer
 
 | Version | Supported |
 |---|---|
 | 15 Sequoia – 10.15 Catalina | ✅ |
 | 10.14 Mojave or older | ❌ |
 
-### 2. Python 3.8 or newer
+#### 2. Python 3.8 or newer
 
 ```bash
 python3 --version
@@ -143,7 +172,7 @@ No Python? Install via [Homebrew](https://brew.sh):
 brew install python
 ```
 
-### 3. Browser access permissions
+#### 3. Browser access permissions
 
 Vigil uses macOS Automation to read browser tabs (including private windows). You need to grant Terminal access in your Mac's privacy settings.
 
@@ -151,6 +180,51 @@ Vigil uses macOS Automation to read browser tabs (including private windows). Yo
 - **macOS 10.15–12:** System Preferences → Security & Privacy → Privacy → Accessibility → add Terminal, then Automation → allow Terminal to control your browsers.
 
 > `install.sh` will offer to open the correct settings screen for you.
+
+---
+
+### Windows requirements
+
+#### 1. Windows 10 (build 17763) or newer
+
+```powershell
+[System.Environment]::OSVersion
+```
+
+#### 2. Python 3.8 or newer
+
+Download from [python.org](https://python.org) and tick **"Add Python to PATH"** during setup.
+
+```powershell
+python --version
+```
+
+#### 3. PowerShell execution policy
+
+Windows blocks `.ps1` scripts by default. The simplest fix is to use the
+provided batch wrapper — it bypasses the policy **only for this script**
+without changing any system setting:
+
+```bat
+install.bat
+```
+
+If you prefer to run the PowerShell script directly, allow user-level scripts once first:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+.\install.ps1
+```
+
+#### 4. Browser address bar access
+
+No special flags or configuration needed. Vigil reads browser URLs via the Windows Accessibility API (UI Automation):
+
+- **Chrome 138+** — native UIA enabled by default (released mid-2025)
+- **Edge** — always supported, most reliable
+- **Firefox** — always supported via accessibility API
+
+---
 
 ### 4. OpenAI API key *(optional)*
 
@@ -183,7 +257,7 @@ Vigil sends email through your own existing email account using SMTP — no thir
 
 ### 6. Settings reference
 
-`install.sh` will prompt for everything interactively. To configure manually:
+The installer will prompt for everything interactively. To configure manually:
 
 ```bash
 cp .env.template .env
@@ -230,8 +304,10 @@ SUMMARY_SCHEDULE_HOUR=9
 
 ## 🚀 Installation
 
+### macOS
+
 ```bash
-bash install.sh
+bash platforms/macos/install.sh
 ```
 
 The installer will:
@@ -244,8 +320,36 @@ The installer will:
 7. Send a confirmation email
 
 ```bash
-bash install.sh --status   # check if services are running
-bash install.sh            # re-run any time to update settings or restart services
+bash platforms/macos/install.sh --status   # check if services are running
+bash platforms/macos/install.sh            # re-run any time to update settings or restart services
+```
+
+### Windows
+
+Navigate into `platforms\windows\`, then double-click **`install.bat`**, or open a Command Prompt / PowerShell in the project root and run:
+
+```bat
+platforms\windows\install.bat
+```
+
+The `.bat` wrapper bypasses the PowerShell execution policy for this script only — no system changes needed.
+
+If you prefer to run the PowerShell script directly, see the [execution policy note](#3-powershell-execution-policy) above, then:
+
+```powershell
+.\platforms\windows\install.ps1
+```
+
+The installer will:
+1. Verify Windows 10+ and Python 3.8+
+2. Walk you through `.env` configuration interactively
+3. Validate your SMTP connection
+4. Install Python packages via pip
+5. Register both services in Task Scheduler (auto-restart on crash, auto-start at logon)
+
+```bat
+platforms\windows\install.bat -Status      # check if services are running
+platforms\windows\install.bat -Reinstall   # re-register tasks after moving the folder or upgrading Python
 ```
 
 **After installation, Vigil runs silently:**
@@ -258,8 +362,22 @@ bash install.sh            # re-run any time to update settings or restart servi
 
 ## 🛑 Uninstall
 
+### macOS
+
 ```bash
-bash uninstall.sh
+bash platforms/macos/uninstall.sh
+```
+
+### Windows
+
+```bat
+platforms\windows\uninstall.bat
+```
+
+Or directly:
+
+```powershell
+.\platforms\windows\uninstall.ps1
 ```
 
 You'll be asked whether to also delete your log files and settings.
@@ -268,7 +386,10 @@ You'll be asked whether to also delete your log files and settings.
 
 ## 📄 Log Files
 
-All logs are stored in `~/Library/Logs/Vigil/` and `~/Library/Application Support/Vigil/`.
+| Platform | Location |
+|---|---|
+| macOS | `~/Library/Logs/Vigil/` and `~/Library/Application Support/Vigil/` |
+| Windows | `%LOCALAPPDATA%\Vigil\Logs\` and `%APPDATA%\Vigil\` |
 
 | File | Contents |
 |---|---|
@@ -276,6 +397,7 @@ All logs are stored in `~/Library/Logs/Vigil/` and `~/Library/Application Suppor
 | `tracker_stderr.log` | Tracker errors |
 | `summarizer_daemon.log` | Digest sends, API calls, watchdog checks |
 | `summarizer_stderr.log` | Summariser errors |
+| `alerter.log` | Adult-site detections, cooldown suppressions, and alert email results (check here if alerts aren't arriving) |
 | `detailed_activity_log.txt` | Full browsing log with timestamps |
 | `detailed_activity_log.txt.sha256` | Tamper-detection hash |
 
@@ -295,8 +417,14 @@ All logs are stored in `~/Library/Logs/Vigil/` and `~/Library/Application Suppor
 
 ## 🧪 Tests
 
+**macOS / Linux:**
 ```bash
 .venv/bin/pytest tests/ -v
+```
+
+**Windows:**
+```bat
+.venv\Scripts\pytest tests/ -v
 ```
 
 No real browsing data, email accounts, or OpenAI calls are used — everything runs against temporary files.
@@ -305,6 +433,8 @@ No real browsing data, email accounts, or OpenAI calls are used — everything r
 |---|---|
 | `test_tracker.py` | Log writing, timestamps, hash updates, session detection, shutdown events |
 | `test_summarizer.py` | Log cleanup, domain parsing, time totals, email formatting, tamper detection |
+| `test_alerter.py` | Adult-domain detection, cooldown logic, alert dispatch |
+| `test_windows.py` | Windows idle detection, UIA URL reading, active-window label (fully mocked) |
 
 ---
 
@@ -312,11 +442,13 @@ No real browsing data, email accounts, or OpenAI calls are used — everything r
 
 | Component | Tool |
 |---|---|
-| Browser watching | AppleScript via Python `subprocess` |
+| Browser watching (macOS) | AppleScript via Python `subprocess` |
+| Browser watching (Windows) | Windows UI Automation via `uiautomation` + `ctypes` |
 | Scheduling | APScheduler |
 | AI summaries | OpenAI Python SDK *(optional)* |
 | Email | Python `smtplib` |
-| Background services | macOS launchd |
+| Background services (macOS) | launchd |
+| Background services (Windows) | Windows Task Scheduler |
 
 ---
 
