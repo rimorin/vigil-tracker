@@ -41,7 +41,39 @@ You choose to install it. You choose your partner. You can remove it any time. A
 
 ### How it works
 
-You install Vigil on your own computer. It watches your browsing in the background. On a schedule you set, it emails a summary of what you visited to you and your accountability partner. If you visit a pornographic site at any point, an alert goes out immediately — your partner doesn't have to wait. Then you talk about it together, honestly.
+#### Step 1 — Install it (takes about 5 minutes)
+
+Run one command in Terminal:
+
+```bash
+bash install.sh
+```
+
+The installer walks you through everything interactively:
+
+1. **Checks your Mac** — confirms you have a supported macOS version and Python installed.
+2. **Asks for your credentials** — your OpenAI API key, your email account details, and who should receive the reports. You type them in when prompted. Nothing is hardcoded.
+3. **Tests everything before going live** — it connects to OpenAI and your email provider to make sure your credentials actually work before installing anything.
+4. **Asks you to grant browser access** — Vigil needs your permission to read your browser tabs (this is what lets it see private/incognito windows). The installer offers to open the right settings screen for you.
+5. **Installs Python packages** — everything Vigil needs to run.
+6. **Starts both background services** — the tracker and the summariser are registered with macOS so they start automatically when you log in and restart themselves if they ever crash.
+7. **Sends a confirmation email** — you and your accountability partner get a test email confirming everything is set up and working.
+
+That's it. You don't need to leave a terminal window open. Vigil runs in the background from this point on.
+
+#### Step 2 — What happens after installation
+
+Once installed, Vigil runs silently in the background. Here's what it does:
+
+- **Every few seconds** — checks which tab is active in your browser and logs the site and how long you spent on it. This works in both normal and private/incognito windows.
+- **The moment a pornographic site is detected** — an alert email is sent immediately to everyone in your recipients list. Your accountability partner doesn't have to wait for the next report. The same site won't trigger another alert for 30 minutes (to avoid a flood of emails).
+- **On your chosen schedule** (daily, weekly, etc.) — OpenAI reads your browsing log and writes a plain-English summary: which sites you visited, how long you spent, categories, and a clear flag if any pornographic content was detected. That summary is emailed to you and your partner.
+- **Every 5 minutes** — Vigil checks that the tracker is still running. If it has been stopped for any reason, an alert email goes out immediately. This means your partner will know if tracking stops unexpectedly.
+- **If the log file is tampered with** — Vigil detects the change and sends an alert before the next summary is sent.
+
+#### Step 3 — Talk about it
+
+When your partner receives a report or alert, you talk about it — honestly and without judgment. That conversation is the whole point. Vigil gives you both the facts. What you do with them is up to you.
 
 ---
 
