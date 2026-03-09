@@ -4,7 +4,7 @@
 # Usage:
 #   bash install.sh              — guided install (wizard prompts for any missing .env values)
 #   bash install.sh --status     — show service health and recent log output
-#   bash install.sh --update     — show current configuration settings (recipient, schedule, etc.)
+#   bash install.sh --update     — interactively update configuration settings and reload services
 #   bash install.sh --reinstall  — re-fill plists and reload services (use after moving the project)
 
 set -euo pipefail
@@ -108,7 +108,6 @@ if [[ "${1:-}" == "--status" ]]; then
         echo -e "${BOLD}${CYAN}Adult Content Alerts${NC}"
         echo -e "  Enabled     : ${ADULT_ALERT_ENABLED:-true}"
         echo -e "  Cooldown    : ${ADULT_ALERT_COOLDOWN_MINUTES:-30} minutes"
-        echo -e "  Notification: ${ADULT_ALERT_NOTIFICATION:-true}"
         echo -e "  Email alert : ${ADULT_ALERT_EMAIL:-true}"
         echo ""
     else
@@ -137,51 +136,170 @@ fi
 # ── --update flag ─────────────────────────────────────────────────────────
 if [[ "${1:-}" == "--update" ]]; then
     echo ""
-    echo -e "${BOLD}${GREEN}━━━━  Vigil — Current Settings  ━━━━${NC}"
+    echo -e "${BOLD}${GREEN}━━━━  Vigil — Update Settings  ━━━━${NC}"
     echo ""
     if [[ ! -f "$ENV_FILE" ]]; then
-        echo -e "${YELLOW}No .env file found at $ENV_FILE${NC}"
+        echo -e "${YELLOW}No .env file found at $ENV_FILE — run bash install.sh to install first.${NC}"
         exit 1
     fi
-    # Source the .env so we can read the values
-    set -a; source "$ENV_FILE"; set +a
 
+    # Inline helpers (use system python3; venv may not be set up yet)
+    _read_env() {
+        local key="$1" val
+        val=$(grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r')
+        [[ "$val" == "sk-..." || "$val" == "your-app-password" || "$val" =~ example\.com || "$val" == "you@gmail.com" ]] && val=""
+        echo "$val"
+    }
+    _write_env() {
+        local key="$1" val="$2"
+        if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
+            python3 - "$key" "$val" "$ENV_FILE" <<'PYEOF'
+import re, sys
+key, val, path = sys.argv[1], sys.argv[2], sys.argv[3]
+content = open(path).read()
+content = re.sub(r'^' + re.escape(key) + r'=.*$', key + '=' + val, content, flags=re.MULTILINE)
+open(path, 'w').write(content)
+PYEOF
+        else
+            echo "${key}=${val}" >> "$ENV_FILE"
+        fi
+    }
+
+    set -a; source "$ENV_FILE"; set +a
+    echo "  Press Enter to keep the value shown in [brackets]."
+    echo ""
+
+    # ── Email / SMTP ───────────────────────────────────────────────────────
     echo -e "${BOLD}${CYAN}Email / SMTP${NC}"
-    echo -e "  SMTP Host   : ${SMTP_HOST:-<not set>}:${SMTP_PORT:-<not set>}"
-    echo -e "  SMTP User   : ${SMTP_USER:-<not set>}"
-    echo -e "  From        : ${SMTP_FROM:-${SMTP_USER:-<not set>}}"
-    echo -e "  Recipient   : ${SMTP_TO:-<not set>}"
+
+    cur=$(_read_env "SMTP_HOST"); cur="${cur:-${SMTP_HOST:-smtp.gmail.com}}"
+    read -r -p "  SMTP Host [${cur}]: " val
+    _write_env "SMTP_HOST" "${val:-${cur}}"
+
+    cur=$(_read_env "SMTP_PORT"); cur="${cur:-${SMTP_PORT:-587}}"
+    read -r -p "  SMTP Port [${cur}]: " val
+    _write_env "SMTP_PORT" "${val:-${cur}}"
+
+    cur=$(_read_env "SMTP_USER"); cur="${cur:-${SMTP_USER:-}}"
+    read -r -p "  SMTP User [${cur}]: " val
+    _write_env "SMTP_USER" "${val:-${cur}}"
+
+    read -r -s -p "  SMTP Password (leave blank to keep current): " val; echo ""
+    [[ -n "$val" ]] && _write_env "SMTP_PASS" "$val"
+
+    cur=$(_read_env "SMTP_TO"); cur="${cur:-${SMTP_TO:-}}"
+    read -r -p "  Recipient email(s) [${cur}]: " val
+    _write_env "SMTP_TO" "${val:-${cur}}"
+
     echo ""
+
+    # ── AI ─────────────────────────────────────────────────────────────────
     echo -e "${BOLD}${CYAN}AI${NC}"
-    echo -e "  Model       : ${OPENAI_MODEL:-<not set>}"
-    echo -e "  API Key     : ${OPENAI_API_KEY:+set (hidden)}"
+
+    cur=$(_read_env "OPENAI_MODEL"); cur="${cur:-${OPENAI_MODEL:-gpt-4o-mini}}"
+    read -r -p "  OpenAI Model [${cur}]: " val
+    _write_env "OPENAI_MODEL" "${val:-${cur}}"
+
+    read -r -s -p "  OpenAI API Key (leave blank to keep current): " val; echo ""
+    [[ -n "$val" ]] && _write_env "OPENAI_API_KEY" "$val"
+
     echo ""
+
+    # ── Summary Schedule ───────────────────────────────────────────────────
     echo -e "${BOLD}${CYAN}Summary Schedule${NC}"
-    SCHED="${SUMMARY_SCHEDULE:-daily}"
-    echo -e "  Schedule    : ${SCHED}"
-    case "$SCHED" in
-        daily)
-            echo -e "  Send time   : $(printf '%02d:%02d' "${SUMMARY_SCHEDULE_HOUR:-21}" "${SUMMARY_SCHEDULE_MINUTE:-0}")"
+    CUR_SCHED=$(_read_env "SUMMARY_SCHEDULE"); CUR_SCHED="${CUR_SCHED:-${SUMMARY_SCHEDULE:-daily}}"
+    echo -e "  Current schedule: ${CUR_SCHED}"
+    echo "  1) daily    2) hourly    3) weekly    4) monthly    5) keep current (${CUR_SCHED})"
+    echo ""
+    while true; do
+        read -r -p "  Choice [1-5, default 5]: " sched_choice
+        sched_choice="${sched_choice:-5}"
+        case "$sched_choice" in 1|2|3|4|5) break ;; esac
+        echo -e "  ${RED}Enter 1, 2, 3, 4, or 5.${NC}"
+    done
+
+    case "$sched_choice" in
+        1)
+            _write_env "SUMMARY_SCHEDULE" "daily"
+            cur=$(_read_env "SUMMARY_SCHEDULE_HOUR"); cur="${cur:-${SUMMARY_SCHEDULE_HOUR:-21}}"
+            read -r -p "  Hour to send (0-23) [${cur}]: " val
+            _write_env "SUMMARY_SCHEDULE_HOUR" "${val:-${cur}}"
+            cur=$(_read_env "SUMMARY_SCHEDULE_MINUTE"); cur="${cur:-${SUMMARY_SCHEDULE_MINUTE:-0}}"
+            read -r -p "  Minute (0-59) [${cur}]: " val
+            _write_env "SUMMARY_SCHEDULE_MINUTE" "${val:-${cur}}"
+            info "Schedule: daily ✓"
             ;;
-        weekly)
-            echo -e "  Send time   : ${SUMMARY_SCHEDULE_WEEKDAY:-mon} at $(printf '%02d:%02d' "${SUMMARY_SCHEDULE_HOUR:-9}" "${SUMMARY_SCHEDULE_MINUTE:-0}")"
+        2)
+            _write_env "SUMMARY_SCHEDULE" "hourly"
+            cur=$(_read_env "SUMMARY_SCHEDULE_MINUTE"); cur="${cur:-${SUMMARY_SCHEDULE_MINUTE:-0}}"
+            read -r -p "  Minute past the hour (0-59) [${cur}]: " val
+            _write_env "SUMMARY_SCHEDULE_MINUTE" "${val:-${cur}}"
+            info "Schedule: hourly ✓"
             ;;
-        monthly)
-            echo -e "  Send time   : day ${SUMMARY_SCHEDULE_DAY:-1} at $(printf '%02d:%02d' "${SUMMARY_SCHEDULE_HOUR:-9}" "${SUMMARY_SCHEDULE_MINUTE:-0}")"
+        3)
+            _write_env "SUMMARY_SCHEDULE" "weekly"
+            cur=$(_read_env "SUMMARY_SCHEDULE_WEEKDAY"); cur="${cur:-${SUMMARY_SCHEDULE_WEEKDAY:-mon}}"
+            read -r -p "  Day of week (mon-sun) [${cur}]: " val
+            _write_env "SUMMARY_SCHEDULE_WEEKDAY" "${val:-${cur}}"
+            cur=$(_read_env "SUMMARY_SCHEDULE_HOUR"); cur="${cur:-${SUMMARY_SCHEDULE_HOUR:-9}}"
+            read -r -p "  Hour to send (0-23) [${cur}]: " val
+            _write_env "SUMMARY_SCHEDULE_HOUR" "${val:-${cur}}"
+            info "Schedule: weekly ✓"
             ;;
-        interval)
-            echo -e "  Interval    : every ${SUMMARY_SCHEDULE_INTERVAL_MINUTES:-60} minutes"
+        4)
+            _write_env "SUMMARY_SCHEDULE" "monthly"
+            cur=$(_read_env "SUMMARY_SCHEDULE_DAY"); cur="${cur:-${SUMMARY_SCHEDULE_DAY:-1}}"
+            read -r -p "  Day of month (1-28) [${cur}]: " val
+            _write_env "SUMMARY_SCHEDULE_DAY" "${val:-${cur}}"
+            cur=$(_read_env "SUMMARY_SCHEDULE_HOUR"); cur="${cur:-${SUMMARY_SCHEDULE_HOUR:-9}}"
+            read -r -p "  Hour to send (0-23) [${cur}]: " val
+            _write_env "SUMMARY_SCHEDULE_HOUR" "${val:-${cur}}"
+            info "Schedule: monthly ✓"
             ;;
-        hourly)
-            echo -e "  Send time   : every hour"
+        5)
+            info "Schedule unchanged."
             ;;
     esac
+
     echo ""
+
+    # ── Adult Content Alerts ───────────────────────────────────────────────
     echo -e "${BOLD}${CYAN}Adult Content Alerts${NC}"
-    echo -e "  Enabled     : ${ADULT_ALERT_ENABLED:-true}"
-    echo -e "  Cooldown    : ${ADULT_ALERT_COOLDOWN_MINUTES:-30} minutes"
-    echo -e "  Notification: ${ADULT_ALERT_NOTIFICATION:-true}"
-    echo -e "  Email alert : ${ADULT_ALERT_EMAIL:-true}"
+
+    cur=$(_read_env "ADULT_ALERT_ENABLED"); cur="${cur:-${ADULT_ALERT_ENABLED:-true}}"
+    read -r -p "  Enabled (true/false) [${cur}]: " val
+    _write_env "ADULT_ALERT_ENABLED" "${val:-${cur}}"
+
+    cur=$(_read_env "ADULT_ALERT_COOLDOWN_MINUTES"); cur="${cur:-${ADULT_ALERT_COOLDOWN_MINUTES:-30}}"
+    read -r -p "  Cooldown minutes [${cur}]: " val
+    _write_env "ADULT_ALERT_COOLDOWN_MINUTES" "${val:-${cur}}"
+
+    cur=$(_read_env "ADULT_ALERT_EMAIL"); cur="${cur:-${ADULT_ALERT_EMAIL:-true}}"
+    read -r -p "  Email alerts (true/false) [${cur}]: " val
+    _write_env "ADULT_ALERT_EMAIL" "${val:-${cur}}"
+
+    echo ""
+    info "Settings saved to .env ✓"
+    echo ""
+
+    # ── Reload running services ────────────────────────────────────────────
+    RELOAD_COUNT=0
+    for plist_dst in \
+        "$LAUNCH_AGENTS_DIR/com.vigil.tracker.plist" \
+        "$LAUNCH_AGENTS_DIR/com.vigil.summarizer.plist"; do
+        if [[ -f "$plist_dst" ]]; then
+            launchctl_unload "$plist_dst"
+            launchctl_load  "$plist_dst"
+            (( RELOAD_COUNT++ )) || true
+        fi
+    done
+
+    if (( RELOAD_COUNT > 0 )); then
+        info "Services reloaded with new settings ✓"
+    else
+        warn "No installed services found — run bash install.sh to install."
+    fi
+
     echo ""
     exit 0
 fi
@@ -252,11 +370,10 @@ SUMMARY_SCHEDULE_DAY=1
 SUMMARY_SCHEDULE_INTERVAL_MINUTES=60
 
 # ── Adult content alerts ────────────────────────────────────────────────────
-# Real-time macOS notification + email when an adult/porn site is visited.
+# Real-time email alert when an adult/porn site is visited.
 # All values below are optional — defaults shown are used if not set.
 ADULT_ALERT_ENABLED=true
 ADULT_ALERT_COOLDOWN_MINUTES=30
-ADULT_ALERT_NOTIFICATION=true
 ADULT_ALERT_EMAIL=true
 EOF
 fi

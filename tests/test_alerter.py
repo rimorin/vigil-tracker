@@ -31,8 +31,8 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _block_external_io():
-    """Prevent any real SMTP or subprocess call from firing during tests."""
-    with patch("smtplib.SMTP"), patch("smtplib.SMTP_SSL"), patch("subprocess.run"):
+    """Prevent any real SMTP call from firing during tests."""
+    with patch("smtplib.SMTP"), patch("smtplib.SMTP_SSL"):
         yield
 
 # ---------------------------------------------------------------------------
@@ -142,31 +142,32 @@ class TestCheckUrlParsing:
         self.alerter._cooldown.clear()
 
     def _check_with_mocks(self, label):
-        with patch.object(self.alerter, "_send_macos_notification") as mock_notif, \
-             patch.object(self.alerter, "_send_alert_email") as mock_email:
+        with patch.object(self.alerter, "_send_alert_email") as mock_email:
             self.alerter.check_url(label)
-            return mock_notif, mock_email
+            return mock_email
 
     def test_safari_label_format(self):
-        mock_notif, mock_email = self._check_with_mocks("[Safari] https://adultexample.com/page")
-        mock_notif.assert_called_once_with("adultexample.com")
+        mock_email = self._check_with_mocks("[Safari] https://adultexample.com/page")
+        mock_email.assert_called_once_with("adultexample.com", mock_email.call_args[0][1])
 
     def test_chrome_label_format(self):
-        mock_notif, _ = self._check_with_mocks("[Google Chrome] https://adultexample.com/")
-        mock_notif.assert_called_once_with("adultexample.com")
+        mock_email = self._check_with_mocks("[Google Chrome] https://adultexample.com/")
+        mock_email.assert_called_once()
+        assert mock_email.call_args[0][0] == "adultexample.com"
 
     def test_www_stripped_before_lookup(self):
-        mock_notif, _ = self._check_with_mocks("[Safari] https://www.adultexample.com/")
-        mock_notif.assert_called_once_with("adultexample.com")
+        mock_email = self._check_with_mocks("[Safari] https://www.adultexample.com/")
+        mock_email.assert_called_once()
+        assert mock_email.call_args[0][0] == "adultexample.com"
 
     def test_clean_domain_no_alert(self):
-        mock_notif, mock_email = self._check_with_mocks("[Safari] https://github.com/user/repo")
-        mock_notif.assert_not_called()
+        mock_email = self._check_with_mocks("[Safari] https://github.com/user/repo")
         mock_email.assert_not_called()
 
     def test_raw_url_without_browser_prefix(self):
-        mock_notif, _ = self._check_with_mocks("https://adultexample.com/video")
-        mock_notif.assert_called_once_with("adultexample.com")
+        mock_email = self._check_with_mocks("https://adultexample.com/video")
+        mock_email.assert_called_once()
+        assert mock_email.call_args[0][0] == "adultexample.com"
 
     def test_empty_label_no_crash(self):
         # Should not raise even for empty/garbage input
@@ -184,72 +185,37 @@ class TestCheckUrlDispatch:
         self.alerter._BLOCKLIST = frozenset({"adultexample.com"})
         self.alerter._cooldown.clear()
 
-    def test_both_channels_fire_by_default(self):
-        with patch.object(self.alerter, "_send_macos_notification") as mock_notif, \
-             patch.object(self.alerter, "_send_alert_email") as mock_email:
+    def test_email_fires_by_default(self):
+        with patch.object(self.alerter, "_send_alert_email") as mock_email:
             self.alerter.check_url("[Safari] https://adultexample.com/")
-            mock_notif.assert_called_once()
-            mock_email.assert_called_once()
-
-    def test_notification_disabled(self, monkeypatch):
-        import config
-        monkeypatch.setattr(config, "ADULT_ALERT_NOTIFICATION", False)
-        with patch.object(self.alerter, "_send_macos_notification") as mock_notif, \
-             patch.object(self.alerter, "_send_alert_email") as mock_email:
-            self.alerter.check_url("[Safari] https://adultexample.com/")
-            mock_notif.assert_not_called()
             mock_email.assert_called_once()
 
     def test_email_disabled(self, monkeypatch):
         import config
         monkeypatch.setattr(config, "ADULT_ALERT_EMAIL", False)
-        with patch.object(self.alerter, "_send_macos_notification") as mock_notif, \
-             patch.object(self.alerter, "_send_alert_email") as mock_email:
+        with patch.object(self.alerter, "_send_alert_email") as mock_email:
             self.alerter.check_url("[Safari] https://adultexample.com/")
-            mock_notif.assert_called_once()
             mock_email.assert_not_called()
 
     def test_master_switch_disables_all(self, monkeypatch):
         import config
         monkeypatch.setattr(config, "ADULT_ALERT_ENABLED", False)
-        with patch.object(self.alerter, "_send_macos_notification") as mock_notif, \
-             patch.object(self.alerter, "_send_alert_email") as mock_email:
+        with patch.object(self.alerter, "_send_alert_email") as mock_email:
             self.alerter.check_url("[Safari] https://adultexample.com/")
-            mock_notif.assert_not_called()
             mock_email.assert_not_called()
 
     def test_cooldown_suppresses_second_alert(self):
-        with patch.object(self.alerter, "_send_macos_notification") as mock_notif, \
-             patch.object(self.alerter, "_send_alert_email"):
+        with patch.object(self.alerter, "_send_alert_email") as mock_email:
             self.alerter.check_url("[Safari] https://adultexample.com/")
             self.alerter.check_url("[Safari] https://adultexample.com/other-page")
-        mock_notif.assert_called_once()  # only the first call fires
+        mock_email.assert_called_once()  # only the first call fires
 
     def test_alert_fires_again_after_cooldown_expires(self, monkeypatch):
-        with patch.object(self.alerter, "_send_macos_notification") as mock_notif, \
-             patch.object(self.alerter, "_send_alert_email"):
+        with patch.object(self.alerter, "_send_alert_email") as mock_email:
             self.alerter.check_url("[Safari] https://adultexample.com/")
-            # Expire the cooldown by backdating the monotonic timestamp
             self.alerter._cooldown["adultexample.com"] -= (self.alerter._COOLDOWN_SECS + 1)
             self.alerter.check_url("[Safari] https://adultexample.com/")
-        assert mock_notif.call_count == 2
-
-
-# ---------------------------------------------------------------------------
-# _send_macos_notification
-# ---------------------------------------------------------------------------
-
-class TestSendMacosNotification:
-    def setup_method(self):
-        self.alerter = _reload_alerter()
-
-    def test_calls_osascript(self):
-        with patch("subprocess.run") as mock_run:
-            self.alerter._send_macos_notification("badsite.com")
-            mock_run.assert_called_once()
-            args = mock_run.call_args[0][0]
-            assert args[0] == "osascript"
-            assert "badsite.com" in args[2]
+        assert mock_email.call_count == 2
 
 
 # ---------------------------------------------------------------------------
@@ -273,3 +239,18 @@ class TestSendAlertEmail:
             )
             mock_smtp_cls.assert_called_once_with(config.SMTP_HOST, config.SMTP_PORT, timeout=30)
             mock_smtp_instance.login.assert_called_once_with(config.SMTP_USER, config.SMTP_PASS)
+
+    def test_email_includes_device_name(self):
+        """Alert email body must contain the device name."""
+        self.alerter._DEVICE_NAME = "TestMacBook"
+        captured = {}
+
+        def fake_do_send(subject, html_body, plain_text):
+            captured["html"] = html_body
+            captured["plain"] = plain_text
+
+        with patch.object(self.alerter, "_do_send_smtp", side_effect=fake_do_send):
+            self.alerter._send_alert_email("badsite.com", "2026-01-01 00:00:00")
+
+        assert "TestMacBook" in captured["html"]
+        assert "TestMacBook" in captured["plain"]

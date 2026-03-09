@@ -17,6 +17,7 @@ never propagate to or crash the tracker daemon.
 import concurrent.futures
 import re
 import smtplib
+import socket
 import ssl
 import subprocess
 import time
@@ -27,6 +28,20 @@ from pathlib import Path
 from typing import Dict, FrozenSet, Optional
 
 import config
+
+# Friendly device name shown in alert emails — resolved once at import time.
+def _get_device_name() -> str:
+    try:
+        result = subprocess.run(
+            ["scutil", "--get", "ComputerName"],
+            capture_output=True, text=True, timeout=5,
+        )
+        name = result.stdout.strip()
+        if name:
+            return name
+    except Exception:
+        pass
+    return socket.gethostname()
 
 # Pre-compiled regex: extracts the hostname from either "[Browser] https://host/path"
 # or a raw "https://host/path" label in a single pass — avoids urllib.parse overhead.
@@ -39,6 +54,9 @@ _DOMAIN_SPLIT = re.compile(r'[.\-]')
 # Pre-computed cooldown window in seconds (avoids timedelta object construction
 # on every call; read once at module import so config changes require restart).
 _COOLDOWN_SECS: float = config.ADULT_ALERT_COOLDOWN_MINUTES * 60
+
+# Resolved once — used in alert emails so the recipient knows which machine fired.
+_DEVICE_NAME: str = _get_device_name()
 
 # ---------------------------------------------------------------------------
 # Blocklist — loaded once at import time into a set for O(1) lookup
@@ -129,20 +147,6 @@ def is_adult_domain(domain: str) -> bool:
 # Alert channels
 # ---------------------------------------------------------------------------
 
-def _send_macos_notification(domain: str) -> None:
-    """Fire a macOS banner notification via osascript."""
-    script = (
-        f'display notification "Adult site detected: {domain}" '
-        f'with title "⚠️ Vigil Alert" sound name "Basso"'
-    )
-    subprocess.run(
-        ["osascript", "-e", script],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        timeout=10,
-    )
-
-
 def _do_send_smtp(subject: str, html_body: str, plain_text: str) -> None:
     """Low-level SMTP send (mirrors summarizer.py pattern)."""
     msg = MIMEMultipart("alternative")
@@ -176,6 +180,8 @@ def _send_alert_email(domain: str, timestamp: str) -> None:
     <table style="font-family:monospace;font-size:14px;border-collapse:collapse;">
         <tr><td style="padding:4px 12px 4px 0;color:#555;">Site</td>
             <td style="padding:4px 0;"><strong>{domain}</strong></td></tr>
+        <tr><td style="padding:4px 12px 4px 0;color:#555;">Device</td>
+            <td style="padding:4px 0;">{_DEVICE_NAME}</td></tr>
         <tr><td style="padding:4px 12px 4px 0;color:#555;">Time</td>
             <td style="padding:4px 0;">{timestamp}</td></tr>
     </table>
@@ -183,7 +189,12 @@ def _send_alert_email(domain: str, timestamp: str) -> None:
         Sent by Vigil on {timestamp}.
     </p>
     """
-    plain_text = f"Vigil Alert\nAdult site visited: {domain}\nTime: {timestamp}\n"
+    plain_text = (
+        f"Vigil Alert\n"
+        f"Adult site visited: {domain}\n"
+        f"Device: {_DEVICE_NAME}\n"
+        f"Time: {timestamp}\n"
+    )
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(_do_send_smtp, subject, html_body, plain_text)
@@ -222,12 +233,6 @@ def check_url(label: str) -> None:
 
         _record_alert(domain)
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        if config.ADULT_ALERT_NOTIFICATION:
-            try:
-                _send_macos_notification(domain)
-            except Exception:
-                pass
 
         if config.ADULT_ALERT_EMAIL:
             try:

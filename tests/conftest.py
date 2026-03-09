@@ -6,15 +6,13 @@ and config without installing the package.  Also sets the minimum required
 environment variables so config.py's module-level _require() calls succeed
 without a real .env file being present.
 
-External I/O is permanently disabled for the entire test session via the
+External SMTP is permanently disabled for the entire test session via the
 `_block_all_external_io` session-scoped autouse fixture below.  This runs
 before any test module is imported, making it impossible for any real SMTP
-connection or subprocess to fire — even if a test accidentally bypasses the
-module-level mocks in test_alerter.py.
+connection to fire — even if a test accidentally bypasses the module-level
+mocks in test_alerter.py.
 """
 
-import smtplib
-import subprocess
 import os
 import sys
 from pathlib import Path
@@ -37,19 +35,16 @@ os.environ.setdefault("SMTP_TO",        "recipient@example.com")
 
 @pytest.fixture(autouse=True, scope="session")
 def _block_all_external_io():
-    """Block ALL real SMTP and subprocess calls for the entire test session.
+    """Block ALL real SMTP calls for the entire test session.
 
     This session-scoped fixture starts the patches before any test runs and
     stops them only after the last test finishes.  It is the primary safety
     net; the function-scoped fixture in test_alerter.py is a secondary layer.
     """
-    p_smtp    = patch("smtplib.SMTP")
-    p_ssl     = patch("smtplib.SMTP_SSL")
-    p_subproc = patch("subprocess.run")
+    p_smtp = patch("smtplib.SMTP")
+    p_ssl  = patch("smtplib.SMTP_SSL")
     p_smtp.start()
     p_ssl.start()
-    p_subproc.start()
     yield
     p_smtp.stop()
     p_ssl.stop()
-    p_subproc.stop()
