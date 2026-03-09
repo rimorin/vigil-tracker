@@ -4,6 +4,7 @@
 # Usage:
 #   bash install.sh              — guided install (wizard prompts for any missing .env values)
 #   bash install.sh --status     — show service health and recent log output
+#   bash install.sh --update     — show current configuration settings (recipient, schedule, etc.)
 #   bash install.sh --reinstall  — re-fill plists and reload services (use after moving the project)
 
 set -euo pipefail
@@ -81,6 +82,39 @@ if [[ "${1:-}" == "--status" ]]; then
         echo -e "  ${BOLD}${label}${NC}: ${svc_status}"
     done
     echo ""
+    if [[ -f "$ENV_FILE" ]]; then
+        set -a; source "$ENV_FILE"; set +a
+        echo -e "${BOLD}${CYAN}Email / SMTP${NC}"
+        echo -e "  SMTP Host   : ${SMTP_HOST:-<not set>}:${SMTP_PORT:-<not set>}"
+        echo -e "  SMTP User   : ${SMTP_USER:-<not set>}"
+        echo -e "  From        : ${SMTP_FROM:-${SMTP_USER:-<not set>}}"
+        echo -e "  Recipient   : ${SMTP_TO:-<not set>}"
+        echo ""
+        echo -e "${BOLD}${CYAN}AI${NC}"
+        echo -e "  Model       : ${OPENAI_MODEL:-<not set>}"
+        echo -e "  API Key     : ${OPENAI_API_KEY:+set (hidden)}"
+        echo ""
+        echo -e "${BOLD}${CYAN}Summary Schedule${NC}"
+        SCHED="${SUMMARY_SCHEDULE:-daily}"
+        echo -e "  Schedule    : ${SCHED}"
+        case "$SCHED" in
+            daily)    echo -e "  Send time   : $(printf '%02d:%02d' "${SUMMARY_SCHEDULE_HOUR:-21}" "${SUMMARY_SCHEDULE_MINUTE:-0}")" ;;
+            weekly)   echo -e "  Send time   : ${SUMMARY_SCHEDULE_WEEKDAY:-mon} at $(printf '%02d:%02d' "${SUMMARY_SCHEDULE_HOUR:-9}" "${SUMMARY_SCHEDULE_MINUTE:-0}")" ;;
+            monthly)  echo -e "  Send time   : day ${SUMMARY_SCHEDULE_DAY:-1} at $(printf '%02d:%02d' "${SUMMARY_SCHEDULE_HOUR:-9}" "${SUMMARY_SCHEDULE_MINUTE:-0}")" ;;
+            interval) echo -e "  Interval    : every ${SUMMARY_SCHEDULE_INTERVAL_MINUTES:-60} minutes" ;;
+            hourly)   echo -e "  Send time   : every hour" ;;
+        esac
+        echo ""
+        echo -e "${BOLD}${CYAN}Adult Content Alerts${NC}"
+        echo -e "  Enabled     : ${ADULT_ALERT_ENABLED:-true}"
+        echo -e "  Cooldown    : ${ADULT_ALERT_COOLDOWN_MINUTES:-30} minutes"
+        echo -e "  Notification: ${ADULT_ALERT_NOTIFICATION:-true}"
+        echo -e "  Email alert : ${ADULT_ALERT_EMAIL:-true}"
+        echo ""
+    else
+        echo -e "${YELLOW}No .env file found — settings unavailable${NC}"
+        echo ""
+    fi
     for log in tracker_daemon.log summarizer_daemon.log; do
         log_path="$HOME/Library/Logs/Vigil/$log"
         if [[ -f "$log_path" ]]; then
@@ -97,6 +131,58 @@ if [[ "${1:-}" == "--status" ]]; then
             echo ""
         fi
     done
+    exit 0
+fi
+
+# ── --update flag ─────────────────────────────────────────────────────────
+if [[ "${1:-}" == "--update" ]]; then
+    echo ""
+    echo -e "${BOLD}${GREEN}━━━━  Vigil — Current Settings  ━━━━${NC}"
+    echo ""
+    if [[ ! -f "$ENV_FILE" ]]; then
+        echo -e "${YELLOW}No .env file found at $ENV_FILE${NC}"
+        exit 1
+    fi
+    # Source the .env so we can read the values
+    set -a; source "$ENV_FILE"; set +a
+
+    echo -e "${BOLD}${CYAN}Email / SMTP${NC}"
+    echo -e "  SMTP Host   : ${SMTP_HOST:-<not set>}:${SMTP_PORT:-<not set>}"
+    echo -e "  SMTP User   : ${SMTP_USER:-<not set>}"
+    echo -e "  From        : ${SMTP_FROM:-${SMTP_USER:-<not set>}}"
+    echo -e "  Recipient   : ${SMTP_TO:-<not set>}"
+    echo ""
+    echo -e "${BOLD}${CYAN}AI${NC}"
+    echo -e "  Model       : ${OPENAI_MODEL:-<not set>}"
+    echo -e "  API Key     : ${OPENAI_API_KEY:+set (hidden)}"
+    echo ""
+    echo -e "${BOLD}${CYAN}Summary Schedule${NC}"
+    SCHED="${SUMMARY_SCHEDULE:-daily}"
+    echo -e "  Schedule    : ${SCHED}"
+    case "$SCHED" in
+        daily)
+            echo -e "  Send time   : $(printf '%02d:%02d' "${SUMMARY_SCHEDULE_HOUR:-21}" "${SUMMARY_SCHEDULE_MINUTE:-0}")"
+            ;;
+        weekly)
+            echo -e "  Send time   : ${SUMMARY_SCHEDULE_WEEKDAY:-mon} at $(printf '%02d:%02d' "${SUMMARY_SCHEDULE_HOUR:-9}" "${SUMMARY_SCHEDULE_MINUTE:-0}")"
+            ;;
+        monthly)
+            echo -e "  Send time   : day ${SUMMARY_SCHEDULE_DAY:-1} at $(printf '%02d:%02d' "${SUMMARY_SCHEDULE_HOUR:-9}" "${SUMMARY_SCHEDULE_MINUTE:-0}")"
+            ;;
+        interval)
+            echo -e "  Interval    : every ${SUMMARY_SCHEDULE_INTERVAL_MINUTES:-60} minutes"
+            ;;
+        hourly)
+            echo -e "  Send time   : every hour"
+            ;;
+    esac
+    echo ""
+    echo -e "${BOLD}${CYAN}Adult Content Alerts${NC}"
+    echo -e "  Enabled     : ${ADULT_ALERT_ENABLED:-true}"
+    echo -e "  Cooldown    : ${ADULT_ALERT_COOLDOWN_MINUTES:-30} minutes"
+    echo -e "  Notification: ${ADULT_ALERT_NOTIFICATION:-true}"
+    echo -e "  Email alert : ${ADULT_ALERT_EMAIL:-true}"
+    echo ""
     exit 0
 fi
 
@@ -164,6 +250,14 @@ SUMMARY_SCHEDULE_MINUTE=0
 SUMMARY_SCHEDULE_WEEKDAY=mon
 SUMMARY_SCHEDULE_DAY=1
 SUMMARY_SCHEDULE_INTERVAL_MINUTES=60
+
+# ── Adult content alerts ────────────────────────────────────────────────────
+# Real-time macOS notification + email when an adult/porn site is visited.
+# All values below are optional — defaults shown are used if not set.
+ADULT_ALERT_ENABLED=true
+ADULT_ALERT_COOLDOWN_MINUTES=30
+ADULT_ALERT_NOTIFICATION=true
+ADULT_ALERT_EMAIL=true
 EOF
 fi
 

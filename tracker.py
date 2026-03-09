@@ -11,6 +11,8 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
+import alerter
+
 APP_SUPPORT_DIR = Path.home() / "Library" / "Application Support" / "Vigil"
 LOG_DIR = Path.home() / "Library" / "Logs" / "Vigil"
 APP_SUPPORT_DIR.mkdir(parents=True, exist_ok=True)
@@ -304,6 +306,11 @@ def main():
                 }
                 if active_label else None
             )
+            if active_label:
+                try:
+                    alerter.check_url(active_label)
+                except Exception:
+                    pass
 
         time.sleep(5)
 

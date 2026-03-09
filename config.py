@@ -64,3 +64,15 @@ SUMMARY_SCHEDULE_INTERVAL_MINUTES: int = int(os.environ.get("SUMMARY_SCHEDULE_IN
 # Activity log entries older than this many days are pruned by the daily
 # cleanup job in the summarizer daemon.
 LOG_RETENTION_DAYS: int = int(os.environ.get("LOG_RETENTION_DAYS", "30"))
+
+# ---------------------------------------------------------------------------
+# Adult content alerts
+# ---------------------------------------------------------------------------
+# Real-time alerts fired by alerter.py whenever an adult/porn site is visited.
+ADULT_ALERT_ENABLED: bool = os.environ.get("ADULT_ALERT_ENABLED", "true").lower() == "true"
+# Minutes before the same domain can trigger another alert (prevents spam).
+ADULT_ALERT_COOLDOWN_MINUTES: int = int(os.environ.get("ADULT_ALERT_COOLDOWN_MINUTES", "30"))
+# Fire a macOS banner notification via osascript.
+ADULT_ALERT_NOTIFICATION: bool = os.environ.get("ADULT_ALERT_NOTIFICATION", "true").lower() == "true"
+# Send an alert email via the configured SMTP settings.
+ADULT_ALERT_EMAIL: bool = os.environ.get("ADULT_ALERT_EMAIL", "true").lower() == "true"
