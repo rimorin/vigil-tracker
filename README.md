@@ -1,6 +1,8 @@
 # Vigil
 
-> **⚠️ macOS only** — this tool uses AppleScript, launchd, and macOS-specific APIs. It does not run on Windows or Linux.
+> **🧪 Experimental** — this is an early-stage project. Expect rough edges, and please report any issues you run into.
+
+> **⚠️ macOS only (for now)** — this tool currently uses AppleScript, launchd, and macOS-specific APIs. It does not run on Windows or Linux. **Windows and Linux support is a work in progress.**
 
 A macOS background service that tracks your daily web browsing across all major browsers, uses **OpenAI** to write a plain-English summary of what you visited, and emails it to you (and optionally a trusted friend) on a schedule you choose — hourly, daily, weekly, or monthly. It also sends an **instant email alert** the moment an adult or harmful site is opened, so your accountability partner is notified right away — not hours later.
 
