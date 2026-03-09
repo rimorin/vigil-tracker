@@ -2,31 +2,43 @@
 
 > **⚠️ macOS only** — this tool uses AppleScript, launchd, and macOS-specific APIs. It does not run on Windows or Linux.
 
-A macOS background service that monitors your daily web browsing across all major browsers, uses **OpenAI** to generate an intelligent summary, and emails the digest to you (and optionally an accountability partner) on a configurable schedule — hourly, daily, weekly, or monthly — via **SMTP** (works with Gmail, Outlook, Fastmail, or any mail provider).
+A macOS background service that tracks your daily web browsing across all major browsers, uses **OpenAI** to write a plain-English summary of what you visited, and emails it to you (and optionally a trusted friend) on a schedule you choose — hourly, daily, weekly, or monthly. It also sends an **instant email alert** the moment an adult or harmful site is opened, so your accountability partner is notified right away — not hours later.
 
 ---
 
 ## 🎯 Purpose & Why This Exists
 
-Most people don't realise how much time they spend on unproductive or harmful websites until they see it written down. This tool makes your browsing visible — to yourself, or to someone you trust.
+Most people don't realise how much time they spend on harmful or unproductive websites until they see it written down. Vigil makes your browsing visible — to yourself, or to someone you trust.
 
 ### Personal productivity
-Get a daily AI-generated digest of where your time actually went online. No vague estimates — real domains, real categories, real timeline. Use it to identify time sinks, stay accountable to yourself, and gradually shift your browsing habits.
+Get a daily summary of where your time actually went online. Real sites, real categories, real times — no guessing. Use it to spot bad habits and gradually improve them.
 
-### Accountability partnership
-If you or someone you care about is working to overcome unhealthy browsing habits (excessive social media, adult content, gambling, etc.), this tool can serve as a lightweight, consent-based accountability system.
+### A consent-based accountability system
 
-The person being monitored installs the tracker on their own machine with full knowledge. Their browsing digest is emailed to both themselves and a trusted accountability partner. The partner doesn't need to watch in real time — they simply review the daily digest together and have honest conversations.
+> **This tool only works with full consent.** It must be installed by the person being monitored — no one else. Installing it on someone's device without them knowing is a serious breach of trust and is likely illegal. Vigil is a tool for honest, mutual support — not spying.
 
-> **Consent is everything.** This tool should only ever be installed by the person being monitored, with their full knowledge and agreement. Using it without someone's awareness is a violation of their privacy and trust — and likely illegal. This is a tool for mutual accountability, not surveillance.
+If you're trying to cut back on pornography, gambling, social media, or any other harmful browsing habit, the hardest part isn't knowing what to stop — it's staying honest when no one is watching. That's where accountability helps.
+
+#### Why accountability works
+
+- **You can't hide from what's written down.** It's easy to brush off a bad habit in your head. It's harder when you can see exactly what sites you visited and for how long — and when someone you respect will see it too.
+- **A trusted person keeps you honest.** This isn't about punishment. It's about having someone in your corner who you don't want to let down. That feeling alone can stop a bad moment from turning into a bad habit.
+- **Instant alerts stop things early.** Most tools only show you what happened yesterday. Vigil emails your partner the moment a harmful site is opened — which means a slip can be caught and talked about right away, before it becomes a pattern.
+- **Honesty beats shame.** When you've agreed to share your browsing openly, a slip becomes something you talk about — not something you hide. That's a much healthier way to make progress.
+- **You're in control.** You install it yourself, you configure it yourself, and you can remove it any time. Accountability that you choose works far better than accountability forced on you.
+
+#### How it works
+
+You install Vigil on your own computer. Your browsing summary gets emailed to you and your accountability partner on a regular schedule. If you visit an adult or harmful site, an alert email goes out straight away — your partner doesn't have to wait for the next digest. You then talk about it together, honestly. No surveillance, no judgment — just two people working toward the same goal.
 
 ---
 
 ## ✨ Features
 
-- 🌐 **Multi-browser support** — tracks exact URLs from Safari, Chrome, Edge, Brave, Arc, Vivaldi (including private/incognito windows); falls back to window title for Firefox, Tor Browser, and Opera
+- 🌐 **Multi-browser support** — full URL capture from Safari, Chrome, Edge, Brave, and Arc (including private/incognito windows); window-title fallback for Firefox, Opera, and Tor Browser. See the [Supported Browsers](#-supported-browsers) table for details.
 - 🤖 **AI-powered digest** — OpenAI (`gpt-4o-mini` by default) categorises your activity, surfaces top domains, highlights notable browsing sessions, and **explicitly flags** any adult, gambling, or self-harm content
 - 📧 **Email delivery** — sends a clean HTML email via SMTP (no third-party service required) with Overview, Top Domains, Categories, Timeline Highlights, and Concern Flags sections
+- 🚨 **Live alert emails** — `alerter.py` detects adult/harmful sites in real time (offline, using a domain blocklist + keyword matching) and fires an immediate SMTP alert email the moment a match is found — no waiting for the next digest. A per-domain cooldown prevents alert spam.
 - ⏰ **Flexible schedule** — `hourly`, `daily`, `weekly`, or `monthly` digest controlled entirely by environment variables (powered by APScheduler)
 - 🚀 **Runs as a macOS daemon** — both the tracker and summariser are managed by launchd: auto-start on login, auto-restart on crash
 - 🛡️ **Tamper detection** — a SHA-256 checksum sidecar file is updated on every log write; the summariser alerts if the log has been modified between writes
@@ -36,12 +48,30 @@ The person being monitored installs the tracker on their own machine with full k
 
 ---
 
+## 🌐 Supported Browsers
+
+| Browser | URL capture | Private / Incognito |
+|---|---|---|
+| Safari | ✅ Full URL (AppleScript `current tab`) | ✅ Yes |
+| Google Chrome | ✅ Full URL (AppleScript `active tab`) | ✅ Yes |
+| Microsoft Edge | ✅ Full URL (AppleScript `active tab`) | ✅ Yes |
+| Brave | ✅ Full URL (AppleScript `active tab`) | ✅ Yes |
+| Arc | ✅ Full URL (AppleScript `active tab`) | ✅ Yes |
+| Firefox | ⚠️ Window title only (no AppleScript URL access) | ⚠️ Title only |
+| Opera | ⚠️ Window title only (no AppleScript URL access) | ⚠️ Title only |
+| Tor Browser | ⚠️ Window title only (no AppleScript URL access) | ⚠️ Title only |
+
+> **Full URL capture** requires Automation permission for that browser in **System Settings → Privacy & Security → Automation**. Browsers with window-title fallback are still tracked, but domain-level detail and AI categorisation will be less accurate.
+
+---
+
 ## 📁 Project Structure
 
 ```
 personal_tracker/
 ├── tracker.py                          # Browser polling daemon (AppleScript + Python)
 ├── summarizer.py                       # Long-running scheduler daemon (APScheduler + OpenAI)
+├── alerter.py                          # Real-time adult/harmful site detection and live email alerts
 ├── config.py                           # Environment variable loader
 ├── requirements.txt                    # Python dependencies
 ├── com.vigil.tracker.plist               # launchd template — tracker service
@@ -49,6 +79,8 @@ personal_tracker/
 ├── install.sh                          # One-command install script
 ├── uninstall.sh                        # One-command uninstall script
 ├── .env.template                       # Configuration template (copy to .env)
+├── data/
+│   └── adult_domains.txt               # Offline blocklist used by alerter.py
 ├── detailed_activity_log.txt.sha256    # Tamper-detection checksum (auto-generated)
 └── tests/
     ├── conftest.py                     # Shared pytest fixtures and env stubs
@@ -145,8 +177,11 @@ Open `.env` and fill in your values:
 | `SUMMARY_SCHEDULE_MINUTE` | Minute to send (0–59, default `0`) |
 | `SUMMARY_SCHEDULE_WEEKDAY` | For weekly: `mon`–`sun` (default `mon`) |
 | `SUMMARY_SCHEDULE_DAY` | For monthly: day of month 1–28 (default `1`) |
+| `ADULT_ALERT_ENABLED` | Enable real-time adult content detection (`true` / `false`, default `true`) |
+| `ADULT_ALERT_EMAIL` | Send a live alert email when an adult site is detected (`true` / `false`, default `true`) |
+| `ADULT_ALERT_COOLDOWN_MINUTES` | Minutes before the same domain can trigger another alert — prevents spam (default `30`) |
 
-> **Accountability partner tip:** Add both your email and your partner's email to `SMTP_TO`, separated by a comma. Both will receive every digest.
+> **Accountability partner tip:** Add both your email and your partner's email to `SMTP_TO`, separated by a comma. Both will receive every scheduled digest *and* every live alert email the moment an adult or harmful site is detected.
 
 **Schedule examples:**
 
@@ -270,6 +305,10 @@ The test suite covers all pure-logic functions in `tracker.py` and `summarizer.p
 ---
 
 
+
+---
+
+## 🔧 Tech Stack
 
 | Component | Library / Service | macOS requirement |
 |---|---|---|
