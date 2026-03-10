@@ -25,6 +25,21 @@ launchctl_unload() {
     fi
 }
 
+# ── Partner PIN check (must pass before anything is removed) ──────────────
+if command -v pyenv &>/dev/null; then
+    _PYTHON_PATH="$(pyenv which python3 2>/dev/null)" || _PYTHON_PATH="$(command -v python3 2>/dev/null || true)"
+else
+    _PYTHON_PATH="$(command -v python3 2>/dev/null || true)"
+fi
+if [[ -n "$_PYTHON_PATH" ]]; then
+    if ! "$_PYTHON_PATH" "$REPO_ROOT/pin_auth.py" verify; then
+        echo -e "${RED}[uninstall] Uninstall aborted.${NC}"
+        exit 1
+    fi
+else
+    warn "python3 not found — skipping partner PIN check."
+fi
+
 # ── Send uninstall notification email (before stopping services / deleting .env)
 ENV_FILE="$REPO_ROOT/.env"
 
@@ -106,6 +121,11 @@ if [[ -f "$ENV_FILE" ]]; then
     else
         info ".env kept."
     fi
+fi
+
+# ── Clean up partner PIN from OS keychain ─────────────────────────────────
+if [[ -n "${_PYTHON_PATH:-}" ]]; then
+    "$_PYTHON_PATH" "$REPO_ROOT/pin_auth.py" delete 2>/dev/null || true
 fi
 
 # ── Optionally remove virtual environment ─────────────────────────────────

@@ -5,3 +5,4 @@ tzlocal
 psutil
 uiautomation; sys_platform == "win32"
 pytest
+keyring

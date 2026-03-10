@@ -24,7 +24,7 @@ OPENAI_MODEL: str = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 # SMTP email configuration
 # ---------------------------------------------------------------------------
 SMTP_HOST: str = _require("SMTP_HOST")
-SMTP_PORT: int = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_PORT: int = int(os.environ.get("SMTP_PORT") or "587")
 SMTP_USER: str = _require("SMTP_USER")
 SMTP_PASS: str = _require("SMTP_PASS")
 # Sender address — defaults to SMTP_USER if not explicitly set

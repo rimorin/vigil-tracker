@@ -29,14 +29,17 @@ from socket import gethostname
 from typing import List, Optional, Tuple
 
 from collections import defaultdict
-from apscheduler.schedulers.blocking import BlockingScheduler
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
-from tzlocal import get_localzone_name
-from openai import OpenAI
 
 import config
 from platform_common import acquire_instance_lock, get_app_dirs
+
+# Heavy optional deps — only imported when running as a full daemon.
+# Guarded here so that --uninstall-notify can run without them installed.
+try:
+    from openai import OpenAI
+    _openai_available = True
+except ImportError:
+    _openai_available = False
 
 
 APP_SUPPORT_DIR, LOG_DIR = get_app_dirs()
@@ -54,8 +57,8 @@ PID_FILE = APP_SUPPORT_DIR / "summarizer.pid"
 MAX_LOG_LINES = 3000
 MAX_RESPONSE_TOKENS = 1500
 
-_scheduler: Optional[BlockingScheduler] = None
-_openai_client: Optional[OpenAI] = None
+_scheduler: Optional[object] = None
+_openai_client: Optional[object] = None
 
 # Rotating file logger — 5 MB per file, keep 3 backups
 _handler = RotatingFileHandler(SUMMARIZER_LOG, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
@@ -65,10 +68,12 @@ _logger.setLevel(logging.INFO)
 _logger.addHandler(_handler)
 
 
-def _get_openai_client() -> OpenAI:
+def _get_openai_client():
     """Return a cached OpenAI client (created once, reused across jobs)."""
     global _openai_client
     if _openai_client is None:
+        if not _openai_available:
+            raise RuntimeError("openai package is not installed")
         _openai_client = OpenAI(api_key=config.OPENAI_API_KEY)
     return _openai_client
 
@@ -642,6 +647,8 @@ def _build_trigger() -> Tuple[object, str]:
     weekly  → every WEEKDAY at HH:MM
     monthly → day DAY of each month at HH:MM
     """
+    from apscheduler.triggers.cron import CronTrigger
+    from apscheduler.triggers.interval import IntervalTrigger
     h = config.SUMMARY_SCHEDULE_HOUR
     m = config.SUMMARY_SCHEDULE_MINUTE
 
@@ -833,6 +840,9 @@ def main():
 
     acquire_instance_lock(PID_FILE, _logger)
     global _scheduler
+    from apscheduler.schedulers.blocking import BlockingScheduler
+    from apscheduler.triggers.interval import IntervalTrigger
+    from tzlocal import get_localzone_name
     trigger, desc = _build_trigger()
     _log(f"Summarizer daemon started — schedule: {desc}")
 

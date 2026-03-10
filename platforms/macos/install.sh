@@ -280,6 +280,35 @@ PYEOF
     _write_env "ALERT_EMAIL" "${val:-${cur}}"
 
     echo ""
+    echo -e "${BOLD}${CYAN}Partner PIN${NC}"
+    if "$PYTHON_PATH" "$REPO_ROOT/pin_auth.py" status &>/dev/null; then
+        echo "  A partner PIN is currently set."
+        read -r -p "  Change partner PIN? [y/N]: " CHANGE_PIN
+        if [[ "$CHANGE_PIN" =~ ^[Yy]$ ]]; then
+            if "$PYTHON_PATH" "$REPO_ROOT/pin_auth.py" hash; then
+                info "Partner PIN updated ✓"
+            else
+                warn "PIN update cancelled — keeping existing PIN."
+            fi
+        fi
+        read -r -p "  Remove partner PIN entirely? [y/N]: " REMOVE_PIN
+        if [[ "$REMOVE_PIN" =~ ^[Yy]$ ]]; then
+            "$PYTHON_PATH" "$REPO_ROOT/pin_auth.py" delete
+            info "Partner PIN removed."
+        fi
+    else
+        echo "  No partner PIN is currently set."
+        read -r -p "  Set a partner PIN? [y/N]: " SET_PIN
+        if [[ "$SET_PIN" =~ ^[Yy]$ ]]; then
+            if "$PYTHON_PATH" "$REPO_ROOT/pin_auth.py" hash; then
+                info "Partner PIN set ✓"
+            else
+                warn "PIN setup cancelled — skipping."
+            fi
+        fi
+    fi
+
+    echo ""
     info "Settings saved to .env ✓"
     echo ""
 
@@ -458,8 +487,39 @@ if [[ ${#MISSING_VARS[@]} -gt 0 ]]; then
         done
         write_env_value "$var" "$entered_val"
         info "Saved ${var} ✓"
+        # Immediately prompt for SMTP_PORT after SMTP_HOST (has a sensible default)
+        if [[ "$var" == "SMTP_HOST" ]]; then
+            echo ""
+            echo -e "  ${CYAN}SMTP port${NC}"
+            echo "  587 = STARTTLS (most providers)  |  465 = SSL/TLS (implicit)"
+            cur_port=$(read_env_value "SMTP_PORT"); cur_port="${cur_port:-587}"
+            read -r -p "  SMTP_PORT [${cur_port}]: " port_val
+            write_env_value "SMTP_PORT" "${port_val:-${cur_port}}"
+            info "Saved SMTP_PORT ✓"
+        fi
         echo ""
     done
+fi
+
+# ── OpenAI API key (optional) ──────────────────────────────────────────────
+if [[ -z "$(read_env_value "OPENAI_API_KEY")" ]]; then
+    echo ""
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}  🤖  OpenAI API key (optional)${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo "  If set, digest emails include an AI-written summary with categories"
+    echo "  and flagged sites. Leave blank to receive a plain visit list instead."
+    echo "  → https://platform.openai.com/api-keys"
+    echo ""
+    read -r -p "  OPENAI_API_KEY (leave blank to skip): " openai_key
+    if [[ -n "$openai_key" ]]; then
+        write_env_value "OPENAI_API_KEY" "$openai_key"
+        info "Saved OPENAI_API_KEY ✓"
+    else
+        info "Skipping OpenAI — plain digest emails will be sent."
+    fi
+    echo ""
 fi
 
 # ── Schedule wizard ────────────────────────────────────────────────────────
@@ -515,6 +575,30 @@ if [[ -z "$CURRENT_SCHEDULE" ]]; then
             info "Schedule: monthly on day ${sched_dom:-1} at ${sched_hour:-9}:00 ✓"
             ;;
     esac
+    echo ""
+fi
+
+# ── Partner PIN (optional) ─────────────────────────────────────────────────
+if ! "$PYTHON_PATH" "$REPO_ROOT/pin_auth.py" status &>/dev/null; then
+    echo ""
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}  🔒  Partner PIN (optional)${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo "  A partner PIN adds a barrier against impulsive uninstallation."
+    echo "  Once set, the PIN must be entered to stop or remove Vigil."
+    echo "  Your accountability partner should be the one to choose the PIN."
+    echo ""
+    read -r -p "  Set a partner PIN now? [y/N]: " SET_PIN
+    if [[ "$SET_PIN" =~ ^[Yy]$ ]]; then
+        if "$PYTHON_PATH" "$REPO_ROOT/pin_auth.py" hash; then
+            info "Partner PIN set ✓"
+        else
+            warn "PIN setup cancelled — skipping."
+        fi
+    else
+        info "Skipping partner PIN — you can set one later by running: bash install.sh --update"
+    fi
     echo ""
 fi
 

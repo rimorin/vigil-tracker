@@ -285,6 +285,34 @@ if ($Update) {
     Write-EnvValue "ALERT_EMAIL"            (Prompt-Val "Email alerts (true/false)"   (Coalesce (Read-EnvValue "ALERT_EMAIL") "true"))
     Write-Host ""
 
+    # -- Partner PIN --
+    Write-Host "  Partner PIN" -ForegroundColor Cyan
+    & $pythonExe "$RepoRoot\pin_auth.py" "status" 2>$null
+    $pinIsSet = ($LASTEXITCODE -eq 0)
+    if ($pinIsSet) {
+        Write-Host "  A partner PIN is currently set."
+        $changePin = Read-Host "  Change partner PIN? [y/N]"
+        if ($changePin -match '^[Yy]') {
+            & $pythonExe "$RepoRoot\pin_auth.py" "hash"
+            if ($LASTEXITCODE -eq 0) { Write-OK "Partner PIN updated" }
+            else { Write-Warn "PIN update cancelled - keeping existing PIN." }
+        }
+        $removePin = Read-Host "  Remove partner PIN entirely? [y/N]"
+        if ($removePin -match '^[Yy]') {
+            & $pythonExe "$RepoRoot\pin_auth.py" "delete"
+            Write-OK "Partner PIN removed."
+        }
+    } else {
+        Write-Host "  No partner PIN is currently set."
+        $setPin = Read-Host "  Set a partner PIN? [y/N]"
+        if ($setPin -match '^[Yy]') {
+            & $pythonExe "$RepoRoot\pin_auth.py" "hash"
+            if ($LASTEXITCODE -eq 0) { Write-OK "Partner PIN set" }
+            else { Write-Warn "PIN setup cancelled - skipping." }
+        }
+    }
+    Write-Host ""
+
     Write-OK "Settings saved to $EnvFile"
     Write-Host ""
 
@@ -453,8 +481,41 @@ if (-not $Reinstall) {
             } while (-not $entered)
             Write-EnvValue $var $entered
             Write-OK "Saved ${var}"
+            # Immediately prompt for SMTP_PORT after SMTP_HOST (has a sensible default)
+            if ($var -eq "SMTP_HOST") {
+                Write-Host ""
+                Write-Host "  SMTP port" -ForegroundColor Cyan
+                Write-Host "  587 = STARTTLS (most providers)  |  465 = SSL/TLS (implicit)"
+                $curPort = (Read-EnvValue "SMTP_PORT")
+                if (-not $curPort) { $curPort = "587" }
+                $portVal = Read-Host "  SMTP_PORT [$curPort]"
+                if (-not $portVal) { $portVal = $curPort }
+                Write-EnvValue "SMTP_PORT" $portVal
+                Write-OK "Saved SMTP_PORT"
+            }
             Write-Host ""
         }
+    }
+
+    # -- OpenAI API key (optional) -----------------------------------------
+    if (-not (Read-EnvValue "OPENAI_API_KEY")) {
+        Write-Host ""
+        Write-Host "  ----------------------------------------------------------------" -ForegroundColor Yellow
+        Write-Host "    OpenAI API key (optional)" -ForegroundColor Yellow
+        Write-Host "  ----------------------------------------------------------------" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  If set, digest emails include an AI-written summary with categories"
+        Write-Host "  and flagged sites. Leave blank to receive a plain visit list instead."
+        Write-Host "  -> https://platform.openai.com/api-keys"
+        Write-Host ""
+        $openaiKey = Read-Host "  OPENAI_API_KEY (leave blank to skip)"
+        if ($openaiKey) {
+            Write-EnvValue "OPENAI_API_KEY" $openaiKey
+            Write-OK "Saved OPENAI_API_KEY"
+        } else {
+            Write-OK "Skipping OpenAI - plain digest emails will be sent."
+        }
+        Write-Host ""
     }
 
     # -- Schedule wizard (only shown if SUMMARY_SCHEDULE not already set) --
@@ -573,6 +634,33 @@ except Exception as e:
         Write-Warn "Could not verify SMTP: $smtpResult - check your internet connection."
         $cont = Read-Host "`n  Continue anyway? [y/N]"
         if ($cont -notmatch '^[Yy]') { exit 1 }
+    }
+
+    # -- Partner PIN (optional) ------------------------------------------------
+    & $pythonExe "$RepoRoot\pin_auth.py" "status" 2>$null
+    $existingPinSet = ($LASTEXITCODE -eq 0)
+    if (-not $existingPinSet) {
+        Write-Host ""
+        Write-Host "  ----------------------------------------------------------------" -ForegroundColor Yellow
+        Write-Host "    Partner PIN (optional)" -ForegroundColor Yellow
+        Write-Host "  ----------------------------------------------------------------" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  A partner PIN adds a barrier against impulsive uninstallation."
+        Write-Host "  Once set, the PIN must be entered to stop or remove Vigil."
+        Write-Host "  Your accountability partner should be the one to choose the PIN."
+        Write-Host ""
+        $setPin = Read-Host "  Set a partner PIN now? [y/N]"
+        if ($setPin -match '^[Yy]') {
+            & $pythonExe "$RepoRoot\pin_auth.py" "hash"
+            if ($LASTEXITCODE -eq 0) {
+                Write-OK "Partner PIN set"
+            } else {
+                Write-Warn "PIN setup cancelled - skipping."
+            }
+        } else {
+            Write-OK "Skipping partner PIN - set one later via: .\install.ps1 -Update"
+        }
+        Write-Host ""
     }
 }
 

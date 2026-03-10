@@ -44,6 +44,30 @@ Write-Host ""
 Write-Host "  ====  Vigil - Uninstall  ====" -ForegroundColor Cyan
 Write-Host ""
 
+# -- Partner PIN check (must pass before anything is removed) ------------------
+$pinPythonExe = $null
+foreach ($cmd in @("python", "python3", "py")) {
+    try {
+        $out = & $cmd --version 2>&1 | Select-Object -First 1
+        if ($out -match "Python (\d+)\.(\d+)") {
+            $maj = [int]$Matches[1]; $min = [int]$Matches[2]
+            if ($maj -gt 3 -or ($maj -eq 3 -and $min -ge 8)) {
+                $pinPythonExe = (Get-Command $cmd -ErrorAction SilentlyContinue).Source
+                break
+            }
+        }
+    } catch { }
+}
+if ($pinPythonExe) {
+    & $pinPythonExe "$RepoRoot\pin_auth.py" "verify"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  Uninstall aborted." -ForegroundColor Red
+        exit 1
+    }
+} else {
+    Write-Warn "python3 not found — skipping partner PIN check."
+}
+
 # -- Send uninstall notification email (before stopping services / deleting .env) --
 # Mirrors uninstall.sh which calls:  python3 summarizer.py --uninstall-notify
 if (Test-Path $EnvFile) {
@@ -140,6 +164,11 @@ if ($DeleteConfig) {
     }
 } else {
     Write-OK ".env kept."
+}
+
+# -- Clean up partner PIN from OS keychain ------------------------------------
+if ($pinPythonExe) {
+    & $pinPythonExe "$RepoRoot\pin_auth.py" "delete" 2>$null
 }
 
 Write-Host ""
