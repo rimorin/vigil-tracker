@@ -3,6 +3,7 @@ import logging
 import re
 import signal
 import sys
+import threading
 import time
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
@@ -11,6 +12,7 @@ from typing import Optional
 import psutil
 
 import alerter
+import config
 from platform_common import acquire_instance_lock, get_app_dirs
 
 # ---------------------------------------------------------------------------
@@ -32,6 +34,7 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 ACTIVITY_LOG = APP_SUPPORT_DIR / "detailed_activity_log.txt"
 INTEGRITY_FILE = APP_SUPPORT_DIR / "detailed_activity_log.txt.sha256"
+ALERT_CURSOR_FILE = APP_SUPPORT_DIR / "alerter_cursor.txt"
 DAEMON_LOG = LOG_DIR / "tracker_daemon.log"
 PID_FILE = APP_SUPPORT_DIR / "tracker.pid"
 
@@ -52,6 +55,25 @@ _logger.addHandler(_handler)
 
 IDLE_THRESHOLD      = 120  # seconds of no input before pausing the session timer
 MIN_SESSION_DURATION =  5  # sessions shorter than this (seconds) are discarded
+
+# ---------------------------------------------------------------------------
+# Alert scan interval
+# ---------------------------------------------------------------------------
+
+_ALERT_SCAN_INTERVAL_SECS: float = config.ALERT_SCAN_INTERVAL_MINUTES * 60
+
+# Lock prevents a slow scan (e.g. SMTP retry) from overlapping with the next.
+_alert_scan_lock = threading.Lock()
+
+
+def _run_scan() -> None:
+    """Run scan_and_alert; skip silently if the previous scan is still in flight."""
+    if not _alert_scan_lock.acquire(blocking=False):
+        return
+    try:
+        alerter.scan_and_alert(ACTIVITY_LOG, ALERT_CURSOR_FILE)
+    finally:
+        _alert_scan_lock.release()
 
 
 # ---------------------------------------------------------------------------
@@ -91,11 +113,16 @@ def _update_integrity_hash():
 # Session management
 # ---------------------------------------------------------------------------
 
-def _log_duration_entry(label: str, duration_seconds: int):
-    """Append '[timestamp] label [duration: Xs]' and refresh the integrity hash."""
+def _log_duration_entry(label: str, duration_seconds: int, is_adult: bool = False):
+    """Append '[timestamp] label [duration: Xs]' and refresh the integrity hash.
+
+    When *is_adult* is True the line is tagged with [FLAGGED_CONTENT] so the
+    periodic scan in main() can find and report it without re-running detection.
+    """
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    tag = f" {alerter.FLAGGED_TAG}" if is_adult else ""
     with open(ACTIVITY_LOG, "a") as f:
-        f.write(f"[{timestamp}] {label} [duration: {duration_seconds}s]\n")
+        f.write(f"[{timestamp}] {label} [duration: {duration_seconds}s]{tag}\n")
     _update_integrity_hash()
 
 
@@ -106,7 +133,7 @@ def _finalize_session(session: dict, now: datetime):
         idle_accumulated += int((now - session["idle_start"]).total_seconds())
     duration = int((now - session["start_time"]).total_seconds()) - idle_accumulated
     if duration >= MIN_SESSION_DURATION:
-        _log_duration_entry(session["label"], duration)
+        _log_duration_entry(session["label"], duration, session.get("is_adult", False))
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +212,8 @@ def main():
     # registers an atexit flush instead.  On macOS this is a no-op.
     _platform.register_exit_handler(lambda: _current_session, _finalize_session)
 
+    _last_alert_scan: float = 0.0  # time.monotonic() timestamp of last scan
+
     while _running:
         active_label = get_active_label()
 
@@ -206,20 +235,28 @@ def main():
         if active_label != prev_label:
             if _current_session is not None:
                 _finalize_session(_current_session, now)
-            _current_session = (
-                {
+            if active_label:
+                is_adult = False
+                try:
+                    is_adult = alerter.check_url(active_label)
+                except Exception:
+                    pass
+                _current_session = {
                     "label":            active_label,
                     "start_time":       now,
                     "idle_accumulated": 0,
                     "idle_start":       now if idle_secs >= IDLE_THRESHOLD else None,
+                    "is_adult":         is_adult,
                 }
-                if active_label else None
-            )
-            if active_label:
-                try:
-                    alerter.check_url(active_label)
-                except Exception:
-                    pass
+            else:
+                _current_session = None
+
+        # Periodic alert scan — daemon thread so SMTP latency never stalls the
+        # main tracking loop.  The lock in _run_scan prevents overlapping scans.
+        now_mono = time.monotonic()
+        if now_mono - _last_alert_scan >= _ALERT_SCAN_INTERVAL_SECS:
+            threading.Thread(target=_run_scan, daemon=True).start()
+            _last_alert_scan = now_mono
 
         time.sleep(5)
 

@@ -37,7 +37,7 @@ You choose to install it. You choose your partner. You can remove it any time.
 ## ✨ Features
 
 - 🌐 **All major browsers** — full URLs in Safari, Chrome, Edge, Brave, and Arc on macOS; Chrome, Edge, Brave, Firefox and more on Windows. See [Supported Browsers](#-supported-browsers).
-- 🚨 **Instant alerts** — alert email sent the moment a pornographic site is detected, with a configurable cooldown per domain.
+- 🚨 **Periodic alerts** — the tracker tags each adult-site visit in the activity log with `[FLAGGED_CONTENT]`; a background scan runs every few minutes (configurable) and sends one consolidated alert email per cycle if any flagged visits are found. Works reliably on both macOS and Windows.
 - 🤖 **AI digest** *(optional)* — with an OpenAI key, summaries include categories, timeline highlights, and flagged content analysis. Without one, a plain visit list (domains, time spent, full log) is sent instead — no external calls needed.
 - 📧 **Email via your own account** — standard SMTP. Gmail, Outlook, iCloud, Fastmail — any provider works.
 - ⏰ **Flexible schedule** — hourly, daily, weekly, or monthly.
@@ -278,9 +278,9 @@ cp .env.template .env
 | `SUMMARY_SCHEDULE_MINUTE` | `0` | Minute to send (0–59) |
 | `SUMMARY_SCHEDULE_WEEKDAY` | `mon` | `mon`–`sun` (weekly only) |
 | `SUMMARY_SCHEDULE_DAY` | `1` | Day 1–28 (monthly only) |
-| `ALERT_ENABLED` | `true` | Enable/disable instant alerts |
+| `ALERT_ENABLED` | `true` | Enable/disable alerts |
 | `ALERT_EMAIL` | `true` | Send alert via email |
-| `ALERT_COOLDOWN_MINUTES` | `30` | Minutes before the same domain alerts again |
+| `ALERT_SCAN_INTERVAL_MINUTES` | `5` | How often (in minutes) to scan the log for flagged visits |
 
 **Schedule examples:**
 
@@ -353,8 +353,8 @@ platforms\windows\install.bat -Reinstall   # re-register tasks after moving the 
 ```
 
 **After installation, Vigil runs silently:**
-- **Every ~5 seconds** — logs the active browser tab and time spent
-- **Instantly** — sends an alert if a pornographic site is detected
+- **Every ~5 seconds** — logs the active browser tab and time spent; flags adult-site visits with `[FLAGGED_CONTENT]` in the log
+- **Every N minutes** — scans the log for new `[FLAGGED_CONTENT]` entries; sends one consolidated alert email per cycle if any are found (interval set by `ALERT_SCAN_INTERVAL_MINUTES`)
 - **On schedule** — sends your digest (AI summary or plain visit list)
 - **Every 5 minutes** — checks the tracker is running; alerts if it stops
 
@@ -397,7 +397,7 @@ You'll be asked whether to also delete your log files and settings.
 | `tracker_stderr.log` | Tracker errors |
 | `summarizer_daemon.log` | Digest sends, API calls, watchdog checks |
 | `summarizer_stderr.log` | Summariser errors |
-| `alerter.log` | Adult-site detections, cooldown suppressions, and alert email results (check here if alerts aren't arriving) |
+| `alerter.log` | Adult-site detections and alert email results (check here if alerts aren't arriving) |
 | `detailed_activity_log.txt` | Full browsing log with timestamps |
 | `detailed_activity_log.txt.sha256` | Tamper-detection hash |
 
@@ -431,9 +431,9 @@ No real browsing data, email accounts, or OpenAI calls are used — everything r
 
 | File | What is tested |
 |---|---|
-| `test_tracker.py` | Log writing, timestamps, hash updates, session detection, shutdown events |
+| `test_tracker.py` | Log writing, timestamps, hash updates, session detection, `[FLAGGED_CONTENT]` tagging, shutdown events |
 | `test_summarizer.py` | Log cleanup, domain parsing, time totals, email formatting, tamper detection |
-| `test_alerter.py` | Adult-domain detection, cooldown logic, alert dispatch |
+| `test_alerter.py` | Adult-domain detection, `[FLAGGED_CONTENT]` log tagging, cursor-based log scanning, consolidated alert email |
 | `test_windows.py` | Windows idle detection, UIA URL reading, active-window label (fully mocked) |
 
 ---

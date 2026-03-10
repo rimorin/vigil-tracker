@@ -1,38 +1,39 @@
 """
-alerter.py — real-time adult/porn site detection and alerting.
+alerter.py — adult/porn site detection and periodic log-scan alerting.
 
-Called by tracker.py on every URL change.  Detection is entirely offline:
+Detection is entirely offline:
   1. Domain blocklist  — exact match against data/domains.txt
   2. Keyword matching  — adult-related substrings found in the domain name
 
-When a match is found, one or both alert channels fire (configured via .env):
-  • macOS banner notification  (ALERT_NOTIFICATION)
-  • Alert email via SMTP        (ALERT_EMAIL)
+Detection (check_url) is called by tracker.py on every URL change and returns
+a bool — no I/O occurs at detection time.
 
-A per-domain cooldown (ALERT_COOLDOWN_MINUTES) prevents alert spam.
-All public functions are wrapped in broad try/except so alerter failures
-never propagate to or crash the tracker daemon.
+When a flagged session is finalised, tracker.py appends a [FLAGGED_CONTENT] tag
+to the activity log entry.  scan_and_alert() is called by the tracker on a
+configurable interval (ALERT_SCAN_INTERVAL_MINUTES) and sends one consolidated
+email for all new [FLAGGED_CONTENT] entries found since the last scan.
+
+A cursor file (alerter_cursor.txt) persists the last-scan timestamp across
+restarts so no entries are double-processed and no entries are missed.
 """
 
-import concurrent.futures
 import logging
 import re
 import smtplib
 import socket
 import ssl
-import time
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Dict, FrozenSet, Optional
+from typing import List, Optional, Tuple
 
 import config
 from platform_common import get_app_dirs
 
 # ---------------------------------------------------------------------------
-# Logger — writes to the same Vigil log directory as tracker.py
+# Logger
 # ---------------------------------------------------------------------------
 
 _, _log_dir = get_app_dirs()
@@ -52,22 +53,27 @@ if not _logger.handlers:
 # Friendly device name shown in alert emails — resolved once at import time.
 _DEVICE_NAME: str = socket.gethostname()
 
-# Pre-compiled regex: extracts the hostname from a full URL that includes the protocol
-# (e.g. Firefox, or a raw "https://host/path" label).
-# Handles user:pass@ credentials, strips path/query/port automatically.
+# Pre-compiled regex: extracts the hostname from a full URL that includes the protocol.
 _HOSTNAME_RE = re.compile(r'https?://(?:[^@/]+@)?([^/:?\s]+)')
 
 # Chrome strips https:// from the address bar value it exposes via UIA, so the
 # active label becomes "[BrowserName] host/path" with no protocol prefix.
-# This pattern captures the bare hostname from that fallback format.
 _BROWSER_BARE_RE = re.compile(r'^\[.+?\]\s+([^/?#:\s]+)')
 
 # Pre-compiled pattern — splits a domain on '.' and '-' for keyword matching.
-_DOMAIN_SPLIT = re.compile(r'[.\-]')
+_DOMAIN_SPLIT = re.compile(r'[.-]')
 
-# Pre-computed cooldown window in seconds (avoids timedelta object construction
-# on every call; read once at module import so config changes require restart).
-_COOLDOWN_SECS: float = config.ALERT_COOLDOWN_MINUTES * 60
+# ---------------------------------------------------------------------------
+# Flagged content tag
+# ---------------------------------------------------------------------------
+
+FLAGGED_TAG = "[FLAGGED_CONTENT]"
+
+# Matches a complete log line that carries the flagged tag.
+# Captures group 1 = timestamp string, group 2 = label (domain or browser label).
+_FLAGGED_LINE_RE = re.compile(
+    r'^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] (.+?) \[duration: \d+s\] \[FLAGGED_CONTENT\]'
+)
 
 # ---------------------------------------------------------------------------
 # Blocklist — loaded once at import time into a set for O(1) lookup
@@ -92,11 +98,10 @@ def _load_blocklist() -> frozenset:
 _BLOCKLIST: frozenset = _load_blocklist()
 
 # ---------------------------------------------------------------------------
-# Keyword matching — substrings that strongly indicate adult content
+# Keyword matching
 # ---------------------------------------------------------------------------
 
-# frozenset enables O(1) set.intersection() instead of O(k) any() over tuple.
-_ADULT_KEYWORDS: FrozenSet[str] = frozenset({
+_ADULT_KEYWORDS: frozenset = frozenset({
     "porn",
     "xxx",
     "nude",
@@ -117,49 +122,74 @@ _ADULT_KEYWORDS: FrozenSet[str] = frozenset({
 })
 
 # ---------------------------------------------------------------------------
-# Cooldown — in-memory per-domain deduplication
-# ---------------------------------------------------------------------------
-
-# Stores time.monotonic() floats — float subtraction is ~5x faster than
-# datetime arithmetic + timedelta construction on every cooldown check.
-_cooldown: Dict[str, float] = {}
-
-
-def _is_on_cooldown(domain: str) -> bool:
-    """Return True if this domain was alerted within the cooldown window."""
-    last = _cooldown.get(domain)
-    return last is not None and (time.monotonic() - last) < _COOLDOWN_SECS
-
-
-def _record_alert(domain: str) -> None:
-    _cooldown[domain] = time.monotonic()
-
-
-# ---------------------------------------------------------------------------
 # Detection
 # ---------------------------------------------------------------------------
 
 def is_adult_domain(domain: str) -> bool:
-    """Return True if *domain* matches the blocklist or an adult keyword.
-
-    Expects *domain* to already be lowercased and www-stripped (as provided
-    by check_url).  When called directly, pass a normalised bare hostname.
-
-    Blocklist lookup is O(1) via frozenset.  Keyword matching splits on '.'
-    and '-' then uses set.intersection() — O(min(parts, keywords)).
-    """
+    """Return True if *domain* matches the blocklist or an adult keyword."""
     if domain in _BLOCKLIST:
         return True
     parts = _DOMAIN_SPLIT.split(domain)
     return bool(_ADULT_KEYWORDS.intersection(parts))
 
 
+def check_url(label: str) -> bool:
+    """Check *label* for adult content and return True if detected.
+
+    Extracts the hostname from the raw URL or '[Browser] URL' format and
+    runs it through the blocklist and keyword matcher.  Never raises.
+    No I/O or email is performed here — detection only.
+    """
+    if not config.ALERT_ENABLED:
+        return False
+
+    try:
+        m = _HOSTNAME_RE.search(label)
+        if m:
+            raw = m.group(1)
+        else:
+            bm = _BROWSER_BARE_RE.match(label)
+            if not bm:
+                return False
+            raw = bm.group(1)
+
+        domain = raw.lower()
+        if domain.startswith("www."):
+            domain = domain[4:]
+
+        return is_adult_domain(domain)
+
+    except Exception as exc:
+        _logger.error("Unexpected error in check_url(%r): %s: %s", label, type(exc).__name__, exc)
+        return False
+
+
 # ---------------------------------------------------------------------------
-# Alert channels
+# Cursor — persists last-scan timestamp to avoid double-processing
+# ---------------------------------------------------------------------------
+
+def _read_cursor(cursor_file: Path) -> Optional[datetime]:
+    """Return the datetime stored in *cursor_file*, or None if absent/unreadable."""
+    try:
+        return datetime.fromisoformat(cursor_file.read_text(encoding="utf-8").strip())
+    except Exception:
+        return None
+
+
+def _write_cursor(cursor_file: Path, dt: datetime) -> None:
+    """Write *dt* as an ISO-format string to *cursor_file*."""
+    try:
+        cursor_file.write_text(dt.isoformat(), encoding="utf-8")
+    except Exception as exc:
+        _logger.error("Failed to write cursor file %s: %s", cursor_file, exc)
+
+
+# ---------------------------------------------------------------------------
+# Email
 # ---------------------------------------------------------------------------
 
 def _do_send_smtp(subject: str, html_body: str, plain_text: str) -> None:
-    """Low-level SMTP send (mirrors summarizer.py pattern)."""
+    """Low-level SMTP send."""
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = f"Vigil <{config.SMTP_FROM}>"
@@ -181,87 +211,94 @@ def _do_send_smtp(subject: str, html_body: str, plain_text: str) -> None:
             smtp.sendmail(config.SMTP_FROM, config.SMTP_TO, msg.as_string())
 
 
-def _send_alert_email(domain: str, timestamp: str) -> None:
-    """Send an adult-site alert email with a 60-second hard timeout."""
-    subject = f"⚠️ Vigil Alert — Adult site visited: {domain}"
+def _send_flagged_email(visits: List[Tuple[str, str]]) -> None:
+    """Send a consolidated alert email for one or more flagged visits.
+
+    *visits* is a list of (label, timestamp) tuples from the activity log.
+    Called from a daemon thread by scan_and_alert so SMTP latency never
+    blocks the main tracking loop.
+    """
+    count = len(visits)
+    subject = f"⚠️ Vigil Alert — {count} flagged site{'s' if count > 1 else ''} visited on {_DEVICE_NAME}"
+
+    rows_html = "".join(
+        f"<tr>"
+        f"<td style='padding:4px 12px 4px 0;color:#555;'>{ts}</td>"
+        f"<td style='padding:4px 0;'><strong>{label}</strong></td>"
+        f"</tr>"
+        for label, ts in visits
+    )
     html_body = f"""
     <p style="font-family:sans-serif;font-size:15px;">
-        An adult or pornographic website was detected in your active browser tab.
+        {'An adult or pornographic website was' if count == 1 else 'Adult or pornographic websites were'}
+        detected in the active browser tab on <strong>{_DEVICE_NAME}</strong>.
     </p>
     <table style="font-family:monospace;font-size:14px;border-collapse:collapse;">
-        <tr><td style="padding:4px 12px 4px 0;color:#555;">Site</td>
-            <td style="padding:4px 0;"><strong>{domain}</strong></td></tr>
-        <tr><td style="padding:4px 12px 4px 0;color:#555;">Device</td>
-            <td style="padding:4px 0;">{_DEVICE_NAME}</td></tr>
-        <tr><td style="padding:4px 12px 4px 0;color:#555;">Time</td>
-            <td style="padding:4px 0;">{timestamp}</td></tr>
+        <tr>
+            <th style="padding:4px 12px 4px 0;color:#555;text-align:left;">Time</th>
+            <th style="padding:4px 0;text-align:left;">Site</th>
+        </tr>
+        {rows_html}
     </table>
     <p style="font-family:sans-serif;font-size:13px;color:#888;margin-top:20px;">
-        Sent by Vigil on {timestamp}.
+        Sent by Vigil at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}.
     </p>
     """
+    plain_rows = "\n".join(f"  {ts}  {label}" for label, ts in visits)
     plain_text = (
-        f"Vigil Alert\n"
-        f"Adult site visited: {domain}\n"
-        f"Device: {_DEVICE_NAME}\n"
-        f"Time: {timestamp}\n"
+        f"Vigil Alert — flagged content detected on {_DEVICE_NAME}\n\n"
+        f"Time                 Site\n"
+        f"{plain_rows}\n"
     )
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(_do_send_smtp, subject, html_body, plain_text)
-        try:
-            future.result(timeout=60)
-            _logger.info("Alert email sent for domain: %s", domain)
-        except concurrent.futures.TimeoutError:
-            _logger.error("Alert email timed out (>60s) for domain: %s", domain)
-        except Exception as exc:
-            _logger.error("Alert email failed for domain %s: %s: %s", domain, type(exc).__name__, exc)
+    try:
+        _do_send_smtp(subject, html_body, plain_text)
+        _logger.info("Alert email sent for %d flagged visit(s).", count)
+    except Exception as exc:
+        _logger.error("Alert email failed: %s: %s", type(exc).__name__, exc)
 
 
 # ---------------------------------------------------------------------------
-# Public entry point
+# Public scan entry point
 # ---------------------------------------------------------------------------
 
-def check_url(label: str) -> None:
-    """Check *label* (raw URL or '[Browser] URL' format) for adult content.
+def scan_and_alert(activity_log: Path, cursor_file: Path) -> None:
+    """Scan *activity_log* for new [FLAGGED_CONTENT] entries and send an alert.
 
-    Uses a pre-compiled regex to extract the hostname in a single pass,
-    avoiding urllib.parse overhead on every tracker poll.  Never raises.
+    Reads the last-scan timestamp from *cursor_file* and processes only log
+    lines whose timestamp is strictly after that value.  Always updates the
+    cursor to datetime.now() after running, so the next scan sees only newer
+    entries.  Sends at most one consolidated email per call.  Never raises.
     """
     if not config.ALERT_ENABLED:
         return
 
     try:
-        m = _HOSTNAME_RE.search(label)
-        if m:
-            raw = m.group(1)
-        else:
-            # Chrome omits https:// in the address-bar value read via UIA.
-            # Try the bare-host fallback: "[BrowserName] host/path".
-            bm = _BROWSER_BARE_RE.match(label)
-            if not bm:
-                return
-            raw = bm.group(1)
-        domain = raw.lower()
-        if domain.startswith("www."):
-            domain = domain[4:]
+        cursor = _read_cursor(cursor_file)
+        now = datetime.now()
 
-        if not is_adult_domain(domain):
-            return
+        visits: List[Tuple[str, str]] = []
 
-        if _is_on_cooldown(domain):
-            _logger.info("Alert suppressed (cooldown active) for domain: %s", domain)
-            return
+        if activity_log.exists():
+            for line in activity_log.read_text(encoding="utf-8", errors="replace").splitlines():
+                m = _FLAGGED_LINE_RE.match(line)
+                if not m:
+                    continue
+                entry_time = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
+                if cursor is not None and entry_time <= cursor:
+                    continue
+                visits.append((m.group(2), m.group(1)))
 
-        _record_alert(domain)
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        _logger.info("Adult domain detected: %s", domain)
-
-        if config.ALERT_EMAIL:
+        if visits and config.ALERT_EMAIL:
             try:
-                _send_alert_email(domain, timestamp)
+                _send_flagged_email(visits)
             except Exception as exc:
-                _logger.error("Unexpected error in _send_alert_email for %s: %s: %s", domain, type(exc).__name__, exc)
+                _logger.error("Unexpected error in _send_flagged_email: %s: %s", type(exc).__name__, exc)
+        elif visits:
+            _logger.info("scan_and_alert: %d flagged visit(s) found but ALERT_EMAIL is disabled.", len(visits))
+
+        _write_cursor(cursor_file, now)
 
     except Exception as exc:
-        _logger.error("Unexpected error in check_url(%r): %s: %s", label, type(exc).__name__, exc)
+        _logger.error("Unexpected error in scan_and_alert: %s: %s", type(exc).__name__, exc)
+

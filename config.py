@@ -68,9 +68,9 @@ LOG_RETENTION_DAYS: int = int(os.environ.get("LOG_RETENTION_DAYS", "30"))
 # ---------------------------------------------------------------------------
 # Adult content alerts
 # ---------------------------------------------------------------------------
-# Real-time alerts fired by alerter.py whenever an adult/porn site is visited.
+# Alerts fired by alerter.py when flagged content entries are found in the log.
 ALERT_ENABLED: bool = os.environ.get("ALERT_ENABLED", "true").lower() == "true"
-# Minutes before the same domain can trigger another alert (prevents spam).
-ALERT_COOLDOWN_MINUTES: int = int(os.environ.get("ALERT_COOLDOWN_MINUTES", "30"))
+# How often (in minutes) the activity log is scanned for flagged content.
+ALERT_SCAN_INTERVAL_MINUTES: int = int(os.environ.get("ALERT_SCAN_INTERVAL_MINUTES", "5"))
 # Send an alert email via the configured SMTP settings.
 ALERT_EMAIL: bool = os.environ.get("ALERT_EMAIL", "true").lower() == "true"

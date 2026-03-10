@@ -77,6 +77,28 @@ class TestLogDurationEntry:
         import re
         assert re.search(r'\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]', content)
 
+    def test_no_flagged_tag_by_default(self, tmp_path, monkeypatch):
+        log = tmp_path / "activity_log.txt"
+        log.write_text("", encoding="utf-8")
+        monkeypatch.setattr(tracker, "ACTIVITY_LOG",  log)
+        monkeypatch.setattr(tracker, "INTEGRITY_FILE", tmp_path / "hash")
+
+        tracker._log_duration_entry("[Safari] github.com", 10)
+
+        assert "[FLAGGED_CONTENT]" not in log.read_text()
+
+    def test_flagged_tag_appended_when_is_adult_true(self, tmp_path, monkeypatch):
+        log = tmp_path / "activity_log.txt"
+        log.write_text("", encoding="utf-8")
+        monkeypatch.setattr(tracker, "ACTIVITY_LOG",  log)
+        monkeypatch.setattr(tracker, "INTEGRITY_FILE", tmp_path / "hash")
+
+        tracker._log_duration_entry("[Chrome] badsite.com", 15, is_adult=True)
+
+        content = log.read_text()
+        assert "[FLAGGED_CONTENT]" in content
+        assert "[Chrome] badsite.com [duration: 15s] [FLAGGED_CONTENT]" in content
+
     def test_updates_integrity_hash(self, tmp_path, monkeypatch):
         log = tmp_path / "activity_log.txt"
         integrity = tmp_path / "activity_log.txt.sha256"
@@ -117,6 +139,22 @@ class TestFinalizeSession:
 
         content = log.read_text()
         assert "[Safari] github.com [duration:" in content
+        assert "[FLAGGED_CONTENT]" not in content
+
+    def test_adult_session_writes_flagged_tag(self, tmp_path, monkeypatch):
+        log = tmp_path / "activity_log.txt"
+        integrity = tmp_path / "activity_log.txt.sha256"
+        log.write_text("", encoding="utf-8")
+        monkeypatch.setattr(tracker, "ACTIVITY_LOG",  log)
+        monkeypatch.setattr(tracker, "INTEGRITY_FILE", integrity)
+
+        session = self._make_session("[Chrome] badsite.com", start_offset_secs=30)
+        session["is_adult"] = True
+        tracker._finalize_session(session, datetime.now())
+
+        content = log.read_text()
+        assert "[Chrome] badsite.com [duration:" in content
+        assert "[FLAGGED_CONTENT]" in content
 
     def test_short_session_discarded(self, tmp_path, monkeypatch):
         log = tmp_path / "activity_log.txt"
