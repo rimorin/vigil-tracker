@@ -149,6 +149,87 @@ mv data/domains_clean.txt data/domains.txt
 
 ---
 
+## 🚨 How Alert Detection Works
+
+Vigil uses a **log-tagging + periodic scan** approach instead of trying to fire an alert the instant a site is opened. This makes the system reliable on both macOS and Windows.
+
+### Step 1 — Tag visits in the activity log
+
+The tracker polls the active browser tab every few seconds. When it detects a domain that matches the blocklist, it sets an `is_adult` flag on the current session.
+
+When the session ends (tab closed, navigated away, or idle), the tracker writes a line to `detailed_activity_log.txt` in the usual format, with `[FLAGGED_CONTENT]` appended:
+
+```
+[2025-11-14 22:03:41] example-adult-site.com [duration: 47s] [FLAGGED_CONTENT]
+```
+
+Normal, non-adult visits are logged identically but without the tag:
+
+```
+[2025-11-14 22:04:30] youtube.com [duration: 120s]
+```
+
+### Step 2 — Periodic scan for flagged entries
+
+A background daemon thread wakes up every `ALERT_SCAN_INTERVAL_MINUTES` (default: 5 minutes). Each time it runs it:
+
+1. Reads the **cursor** — a timestamp stored in `alerter_cursor.txt` marking how far through the log was read last time
+2. Scans only the **new lines** added since that cursor
+3. Collects every line containing `[FLAGGED_CONTENT]`
+4. Advances the cursor to `now` so lines aren't re-read next cycle
+5. If any flagged visits were found — sends **one consolidated alert email** listing every visit from that scan window
+
+```
+Subject: ⚠️ Vigil Alert — Flagged content detected
+
+The following adult/pornographic sites were visited:
+
+  22:03  example-adult-site.com  (47s)
+  22:11  another-flagged-site.com  (12s)
+```
+
+### Why this approach
+
+| Property | Old (real-time) | New (log-scan) |
+|---|---|---|
+| macOS reliability | ✅ | ✅ |
+| Windows reliability | ❌ Unstable | ✅ |
+| Alert latency | Immediate | ≤ scan interval (default 5 min) |
+| Duplicate emails | Possible | Impossible — one email per scan |
+| SMTP failure impact | Stalls main loop | Isolated to background thread |
+| Email on slow SMTP | Could block tracking | Never blocks tracking |
+
+### Sequence diagram
+
+```
+Tracker loop (every ~5s)                   Alert daemon (every 5 min)
+─────────────────────────                  ──────────────────────────
+Poll active tab
+  └─ adult domain? → is_adult = true
+
+Session ends
+  └─ write log line
+       └─ is_adult? → append [FLAGGED_CONTENT]
+                                           Wake up
+                                             └─ read cursor
+                                             └─ scan new log lines
+                                             └─ collect [FLAGGED_CONTENT] lines
+                                             └─ advance cursor
+                                             └─ any found? → send email
+```
+
+### Configuring the scan interval
+
+Set `ALERT_SCAN_INTERVAL_MINUTES` in your `.env` file. Shorter = faster alerts, but more frequent SMTP calls if visits are frequent.
+
+```bash
+ALERT_SCAN_INTERVAL_MINUTES=5   # default — alert within 5 minutes of a visit
+ALERT_SCAN_INTERVAL_MINUTES=1   # near-real-time
+ALERT_SCAN_INTERVAL_MINUTES=10  # less frequent; fine for most use cases
+```
+
+---
+
 ## ✅ Before You Install
 
 ### macOS requirements
