@@ -2,4 +2,6 @@ openai>=1.0.0
 python-dotenv
 apscheduler>=3.10.0
 tzlocal
+psutil
+uiautomation; sys_platform == "win32"
 pytest

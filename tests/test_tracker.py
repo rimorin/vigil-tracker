@@ -15,6 +15,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 import tracker
+from platforms.macos import tracker_macos
 
 
 # ---------------------------------------------------------------------------
@@ -263,21 +264,21 @@ class TestCheckForShutdownEvent:
 
 
 # ---------------------------------------------------------------------------
-# get_active_tab_applescript (structural tests)
+# get_active_tab_applescript (structural tests — macOS AppleScript building)
 # ---------------------------------------------------------------------------
 
 class TestGetActiveTabAppleScript:
     def test_returns_non_empty_string(self):
-        script = tracker.get_active_tab_applescript()
+        script = tracker_macos.get_active_tab_applescript()
         assert isinstance(script, str)
         assert len(script) > 0
 
     def test_contains_safari_block(self):
-        script = tracker.get_active_tab_applescript()
+        script = tracker_macos.get_active_tab_applescript()
         assert 'application "Safari"' in script
         assert "current tab" in script
 
     def test_contains_system_events_block(self):
-        script = tracker.get_active_tab_applescript()
+        script = tracker_macos.get_active_tab_applescript()
         assert "System Events" in script
         assert "frontmost" in script
