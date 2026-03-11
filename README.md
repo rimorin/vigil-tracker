@@ -2,35 +2,48 @@
 
 > **🧪 Experimental** — early-stage project. Things may break. Please report any issues you find.
 
-Vigil runs quietly in the background on your computer. It watches which websites you visit — in both normal and private/incognito windows — and emails a digest to you and a trusted friend on a schedule you choose. If a pornographic site is opened, an alert goes out immediately.
+Vigil runs quietly in the background on your computer. It watches which websites you visit — including private/incognito windows — and emails a digest to you and a trusted accountability partner on a schedule you choose. If a pornographic site is opened, an alert goes out within minutes.
+
+---
+
+## Table of Contents
+
+- [Why This Exists](#-why-this-exists)
+- [Features](#-features)
+- [Supported Browsers](#-supported-browsers)
+- [Project Structure](#-project-structure)
+- [Partner PIN Protection](#-partner-pin-protection)
+- [Updating the Domain Blocklist](#-updating-the-domain-blocklist)
+- [How Alert Detection Works](#-how-alert-detection-works)
+- [Before You Install](#-before-you-install)
+- [Installation](#-installation)
+- [Uninstall](#-uninstall)
+- [Log Files](#-log-files)
+- [Settings Reference](#️-settings-reference)
+- [Privacy](#-privacy)
+- [Tests](#-tests)
+- [Tech Stack](#-tech-stack)
+- [References](#-references)
 
 ---
 
 ## 🎯 Why This Exists
 
-Vigil is for people who want to break a pornography habit. It brings your browsing into the open — so you're not fighting it alone.
+Vigil is for people who want to break a pornography habit by bringing their browsing into the open — so they're not fighting it alone.
 
-### Why the name "Vigil"
+Pornography is more accessible than ever — available on any device, at any time, in complete privacy. The shame that once acted as a natural barrier has been replaced by invisibility — and that invisibility is what makes it dangerous.
 
-A vigil means keeping watch through the night so nothing slips by. That's what this tool does — quietly, in the background. The name also reflects the role of your accountability partner: not a warden, but someone who is *with you* in the fight.
+> *"Countless viewers of pornography damage their marriage, personal dignity, and conscience."*
+> — [Pornography — A Dangerous Trap](https://www.jw.org/en/library/magazines/watchtower-study-june-2019/pornography-a-dangerous-trap/)
 
-### Why willpower alone rarely works
+The habit survives because it hides. Images leave lasting imprints, resurface without warning, and a single unguarded moment can undo months of progress. Most people believe they can handle it alone — most find, after years of trying, that they cannot.
 
-- **The habit hides in secrecy.** Shame keeps it private; privacy keeps it alive. Removing the hiding place — including private/incognito mode — is what breaks the cycle.
-- **The brain gets wired for it.** Pornography floods the brain with dopamine and leaves lasting imprints. Even after stopping, urges can return without warning. Ongoing accountability is what keeps those moments from becoming relapses.
-- **You can't beat it alone.** As one person put it: *"You think you can beat it by yourself. But that is not true. You can beat it only with help."*
+> *"You think you can beat it by yourself. But that is not true. You can beat it only with help."*
+> — Yoshi, quoted in [Pornography — Harmless or Toxic?](https://www.jw.org/en/library/magazines/wp20130801/is-pornography-harmful/)
 
-### How Vigil helps
+Removing the hiding place — including incognito mode — is what breaks the cycle. Vigil does that.
 
-- **No blind spots.** Vigil tracks both normal and incognito browsing. When you know someone will see your activity, the private space where the habit lives disappears.
-- **Fast response.** An alert goes to your partner the moment a pornographic site is opened — before a slip turns into a longer session.
-- **Visible progress.** The regular digest shows patterns over time: when temptation tends to hit, whether things are improving, and when a slip happened. Seeing that in writing is hard to argue with.
-
-### Built on consent
-
-> **Vigil must be installed by the person being monitored — no one else.** Installing it on someone's device without their knowledge is a serious breach of trust and likely illegal. This is a tool for mutual support, not surveillance.
-
-You choose to install it. You choose your partner. You can remove it any time.
+> **Vigil must be installed by the person being monitored — no one else.** This is a tool for mutual support, not surveillance. You choose to install it. You choose your partner.
 
 ---
 
@@ -40,10 +53,11 @@ You choose to install it. You choose your partner. You can remove it any time.
 - 🚨 **Periodic alerts** — the tracker tags each adult-site visit in the activity log with `[FLAGGED_CONTENT]`; a background scan runs every few minutes (configurable) and sends one consolidated alert email per cycle if any flagged visits are found. Works reliably on both macOS and Windows.
 - 🤖 **AI digest** *(optional)* — with an OpenAI key, summaries include categories, timeline highlights, and flagged content analysis. Without one, a plain visit list (domains, time spent, full log) is sent instead — no external calls needed.
 - 📧 **Email via your own account** — standard SMTP. Gmail, Outlook, iCloud, Fastmail — any provider works.
-- ⏰ **Flexible schedule** — hourly, daily, weekly, or monthly.
+- ⏰ **Flexible schedule** — hourly, daily, weekly, monthly, or custom interval.
 - 🚀 **Always running** — starts on login, restarts on crash via macOS launchd or Windows Task Scheduler.
 - 🛡️ **Tamper detection** — if the log file is edited, an alert is sent before the next digest.
 - 👁️ **Watchdog** — if the tracker stops unexpectedly, an alert goes out immediately.
+- 🔑 **Partner PIN protection** — your accountability partner sets a PIN at install time — and keeps it to themselves. Without it, Vigil cannot be uninstalled. The PIN is hashed and stored securely in the OS keychain — not in any file you can edit. Three failed attempts triggers an immediate alert to your partner. See [Partner PIN Protection](#-partner-pin-protection).
 - 🔐 **Private** — only domain names (e.g. `youtube.com`) are ever sent to OpenAI. Full URLs stay on your machine.
 
 ---
@@ -87,6 +101,7 @@ vigil-tracker/
 ├── tracker.py                  # Watches browser tabs every few seconds
 ├── summarizer.py               # Sends scheduled digest emails
 ├── alerter.py                  # Sends instant alerts for porn sites
+├── pin_auth.py                 # Partner PIN hashing and OS keychain storage
 ├── config.py                   # Reads settings from .env
 ├── platform_common.py          # Shared OS path helpers
 ├── requirements.txt            # Python dependencies
@@ -113,7 +128,29 @@ vigil-tracker/
     ├── test_tracker.py
     ├── test_summarizer.py
     ├── test_alerter.py
+    ├── test_pin_auth.py
     └── test_windows.py
+```
+
+---
+
+## 🔒 Partner PIN Protection
+
+People remove accountability tools in moments of weakness. The partner PIN prevents that.
+
+> **You should not know your own PIN.** Your partner sets it at install time and keeps it. Without it, Vigil cannot be uninstalled — turning an impulsive decision into a conversation.
+
+- PIN is hashed with PBKDF2-HMAC-SHA256 — never stored in plain text
+- Stored in the OS keychain (macOS Keychain / Windows Credential Locker)
+- Three wrong attempts → immediate alert email to your partner
+
+**At install:** hand the keyboard to your partner, they enter and confirm the PIN, you look away.
+
+```bash
+python pin_auth.py hash    # set PIN — your partner runs this
+python pin_auth.py verify  # verify PIN
+python pin_auth.py delete  # remove PIN — partner only
+python pin_auth.py status  # check if PIN is set
 ```
 
 ---
@@ -141,10 +178,18 @@ grep -v '^#' data/domains.txt | grep -v '^$' | awk '{print $2}' | grep -v '^0\.0
 mv data/domains_clean.txt data/domains.txt
 ```
 
-> Vigil reads the blocklist once at startup. After editing `domains.txt`, restart the tracker service for changes to take effect:
+> Vigil reads the blocklist once at startup. After editing `domains.txt`, restart the tracker service for changes to take effect.
+>
+> **macOS:**
 > ```bash
 > launchctl unload ~/Library/LaunchAgents/com.vigil.tracker.plist
 > launchctl load  ~/Library/LaunchAgents/com.vigil.tracker.plist
+> ```
+>
+> **Windows** (in an elevated Command Prompt):
+> ```bat
+> schtasks /End /TN "Vigil Tracker"
+> schtasks /Run /TN "Vigil Tracker"
 > ```
 
 ---
@@ -307,7 +352,7 @@ No special flags or configuration needed. Vigil reads browser URLs via the Windo
 
 ---
 
-### 4. OpenAI API key *(optional)*
+### OpenAI API key *(optional)*
 
 Skip this if you don't have one — Vigil will still send a plain visit list digest generated entirely on your machine.
 
@@ -316,7 +361,7 @@ For the full AI summary (categories, timeline highlights, flagged content analys
 2. Create an API key under **API Keys**
 3. Enable billing (~$0.001 per digest)
 
-### 5. Email account (SMTP)
+### Email account (SMTP)
 
 Vigil sends email through your own existing email account using SMTP — no third-party service needed. You provide your email address, an app password, and your provider's server address.
 
@@ -336,7 +381,9 @@ Vigil sends email through your own existing email account using SMTP — no thir
 
 > **Tip:** Put both your address and your partner's in `SMTP_TO` (comma-separated). Both receive every digest and every alert. You can use a spare account as the sender.
 
-### 6. Settings reference
+---
+
+## ⚙️ Settings Reference
 
 The installer will prompt for everything interactively. To configure manually:
 
@@ -354,11 +401,13 @@ cp .env.template .env
 | `SMTP_PASS` | — | Password or app password |
 | `SMTP_FROM` | `SMTP_USER` | Display sender address |
 | `SMTP_TO` | — | Recipient(s), comma-separated |
-| `SUMMARY_SCHEDULE` | `daily` | `hourly` / `daily` / `weekly` / `monthly` |
+| `SUMMARY_SCHEDULE` | `daily` | `hourly` / `daily` / `weekly` / `monthly` / `interval` |
 | `SUMMARY_SCHEDULE_HOUR` | `21` | Hour to send (0–23) |
 | `SUMMARY_SCHEDULE_MINUTE` | `0` | Minute to send (0–59) |
 | `SUMMARY_SCHEDULE_WEEKDAY` | `mon` | `mon`–`sun` (weekly only) |
 | `SUMMARY_SCHEDULE_DAY` | `1` | Day 1–28 (monthly only) |
+| `SUMMARY_SCHEDULE_INTERVAL_MINUTES` | `60` | Minutes between digests (interval only) |
+| `LOG_RETENTION_DAYS` | `30` | Activity log entries older than this many days are pruned |
 | `ALERT_ENABLED` | `true` | Enable/disable alerts |
 | `ALERT_EMAIL` | `true` | Send alert via email |
 | `ALERT_SCAN_INTERVAL_MINUTES` | `5` | How often (in minutes) to scan the log for flagged visits |
@@ -397,8 +446,9 @@ The installer will:
 3. Validate your SMTP connection (and OpenAI key if provided)
 4. Open macOS privacy settings for browser access
 5. Install Python packages
-6. Start both background services (auto-restart on crash, auto-start on login)
-7. Send a confirmation email
+6. Invite your partner to set a PIN (stored securely in macOS Keychain — only they should know it)
+7. Start both background services (auto-restart on crash, auto-start on login)
+8. Send a confirmation email
 
 ```bash
 bash platforms/macos/install.sh --status   # check if services are running
@@ -426,14 +476,19 @@ The installer will:
 2. Walk you through `.env` configuration interactively
 3. Validate your SMTP connection
 4. Install Python packages via pip
-5. Register both services in Task Scheduler (auto-restart on crash, auto-start at logon)
+5. Invite your partner to set a PIN (stored securely in Windows Credential Locker — only they should know it)
+6. Register both services in Task Scheduler (auto-restart on crash, auto-start at logon)
 
 ```bat
 platforms\windows\install.bat -Status      # check if services are running
 platforms\windows\install.bat -Reinstall   # re-register tasks after moving the folder or upgrading Python
 ```
 
-**After installation, Vigil runs silently:**
+---
+
+### After installation
+
+**Vigil runs silently in the background:**
 - **Every ~5 seconds** — logs the active browser tab and time spent; flags adult-site visits with `[FLAGGED_CONTENT]` in the log
 - **Every N minutes** — scans the log for new `[FLAGGED_CONTENT]` entries; sends one consolidated alert email per cycle if any are found (interval set by `ALERT_SCAN_INTERVAL_MINUTES`)
 - **On schedule** — sends your digest (AI summary or plain visit list)
@@ -442,6 +497,8 @@ platforms\windows\install.bat -Reinstall   # re-register tasks after moving the 
 ---
 
 ## 🛑 Uninstall
+
+> **Partner PIN required** — if a partner PIN was set during installation, you will need to enter it before the uninstaller proceeds. Three failed attempts will trigger an alert email to your accountability partner.
 
 ### macOS
 
@@ -515,6 +572,7 @@ No real browsing data, email accounts, or OpenAI calls are used — everything r
 | `test_tracker.py` | Log writing, timestamps, hash updates, session detection, `[FLAGGED_CONTENT]` tagging, shutdown events |
 | `test_summarizer.py` | Log cleanup, domain parsing, time totals, email formatting, tamper detection |
 | `test_alerter.py` | Adult-domain detection, `[FLAGGED_CONTENT]` log tagging, cursor-based log scanning, consolidated alert email |
+| `test_pin_auth.py` | PIN hashing, PBKDF2 verification, keychain storage/retrieval/deletion, failed-attempt lockout and alert email |
 | `test_windows.py` | Windows idle detection, UIA URL reading, active-window label (fully mocked) |
 
 ---
@@ -528,6 +586,7 @@ No real browsing data, email accounts, or OpenAI calls are used — everything r
 | Scheduling | APScheduler |
 | AI summaries | OpenAI Python SDK *(optional)* |
 | Email | Python `smtplib` |
+| PIN storage | `keyring` (macOS Keychain / Windows Credential Locker) |
 | Background services (macOS) | launchd |
 | Background services (Windows) | Windows Task Scheduler |
 
