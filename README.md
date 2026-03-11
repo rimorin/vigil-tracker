@@ -64,7 +64,7 @@ Vigil runs as a background service that periodically reads your browser history 
 
 ## ✨ Features
 
-- 🌐 **All major browsers** — full URLs in Safari, Chrome, Edge, Brave, Arc, and Opera on macOS; Chrome, Edge, Brave, Firefox and more on Windows. See [Supported Browsers](#-supported-browsers).
+- 🌐 **All major browsers** — full URLs in Safari, Chrome, Edge, Brave, Arc, and Opera on macOS; Chrome, Edge, Brave, and more on Windows. See [Supported Browsers](#-supported-browsers).
 - 🚨 **Periodic alerts** — the tracker tags each adult-site visit in the activity log with `[FLAGGED_CONTENT]`; a background scan runs every few minutes (configurable) and sends one consolidated alert email per cycle if any flagged visits are found. Works reliably on both macOS and Windows.
 - 🤖 **AI digest** *(optional)* — with an OpenAI key, summaries include categories, timeline highlights, and flagged content analysis. Without one, a plain visit list (domains, time spent, full log) is sent instead — no external calls needed.
 - 📧 **Email via your own account** — standard SMTP. Gmail, Outlook, iCloud, Fastmail — any provider works.
@@ -90,8 +90,7 @@ Vigil runs as a background service that periodically reads your browser history 
 | Arc | ✅ | ✅ |
 | Comet (Perplexity) | ✅ | ✅ |
 | Opera | ✅ | ✅ |
-| Firefox | ⚠️ Page title only | ⚠️ |
-| Tor Browser | ⚠️ Page title only | ⚠️ |
+| Firefox | ❌ Not supported | ❌ | [See note below](#firefox-note) |
 
 ### Windows
 
@@ -101,12 +100,14 @@ Vigil runs as a background service that periodically reads your browser history 
 | Google Chrome | ✅ | ✅ | Chrome 138+ (mid-2025); English locale only* |
 | Brave | ✅ | ✅ | Chromium-based; same as Chrome |
 | Vivaldi | ✅ | ✅ | Chromium-based; same as Chrome |
-| Firefox | ✅ | ✅ | Via accessibility API |
+| Firefox | ❌ Not supported | ❌ | [See note below](#firefox-note) |
 | Opera | ⚠️ Page title only | ⚠️ | Non-standard address bar |
 
 > ⚠️ browsers are still tracked, but with less detail. For best results, use a ✅ browser.
 >
 > *Chrome on Windows uses a locale-sensitive label to find the address bar. On non-English Windows, Edge is the recommended choice for full URL capture.
+
+> **Firefox note:** Firefox is not supported at this time. Due to architectural limitations (history not written to disk in private mode, database file locking while running, and no accessible address bar API), reliable URL tracking in Firefox — especially in private windows — requires either a browser extension or network-level interception, neither of which fits Vigil's zero-friction install model. Firefox represents ~2–3% of global browser usage; support may be revisited in a future release.
 
 ---
 
@@ -363,7 +364,6 @@ No special flags or configuration needed. Vigil reads browser URLs via the Windo
 
 - **Chrome 138+** — native UIA enabled by default (released mid-2025)
 - **Edge** — always supported, most reliable
-- **Firefox** — always supported via accessibility API
 
 ---
 
