@@ -9,6 +9,7 @@ Vigil runs quietly in the background on your computer. It watches which websites
 ## Table of Contents
 
 - [Why This Exists](#-why-this-exists)
+- [How it Works](#️-how-it-works)
 - [Features](#-features)
 - [Supported Browsers](#-supported-browsers)
 - [Project Structure](#-project-structure)
@@ -44,6 +45,20 @@ The habit survives because it hides. Images leave lasting imprints, resurface wi
 Removing the hiding place — including incognito mode — is what breaks the cycle. Vigil does that.
 
 > **Vigil must be installed by the person being monitored — no one else.** This is a tool for mutual support, not surveillance. You choose to install it. You choose your partner.
+
+---
+
+## ⚙️ How It Works
+
+Vigil runs as a background service that periodically reads your browser history — including private/incognito windows — and cross-checks visited domains against a blocklist of known adult sites.
+
+1. **Browser history is read** every few minutes directly from your browsers' local databases.
+2. **Flagged visits are tagged** with `[FLAGGED_CONTENT]` in a local activity log on your machine.
+3. **A background scan** checks the log on a schedule you set. If flagged content is found, a consolidated alert email goes out to you and your accountability partner within minutes.
+4. **A digest email** is sent on your chosen schedule (hourly, daily, weekly, etc.) — summarising domains visited, time spent, and any flagged content. With an optional OpenAI key, the digest includes an AI-generated summary.
+5. **Watchdog & tamper detection** run continuously: if the service stops unexpectedly or the log file is edited, your partner is notified immediately.
+
+**Real-life example:** Marcus installs Vigil, enters his wife's email as his accountability partner, and she sets a PIN only she knows. One evening Marcus opens an adult site in an incognito tab. Within minutes, both Marcus and his wife receive an alert email listing the domain and the time of the visit. At the end of the week they both receive a digest with the full browsing summary. The knowledge that nothing is hidden is often enough to change the behaviour entirely.
 
 ---
 
