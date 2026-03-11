@@ -73,6 +73,43 @@ function Write-Warn  { param($msg) Write-Host "  [!]  $msg" -ForegroundColor Yel
 function Fail        { param($msg) Write-Host "`n  [ERROR] $msg`n" -ForegroundColor Red; exit 1 }
 function Coalesce    { param($value, $fallback) if ([string]::IsNullOrEmpty($value)) { $fallback } else { $value } }
 
+# ── Spinner (animated indicator for long-running operations) ─────────────
+$script:SpinnerThread = $null
+$script:SpinnerDone   = $null
+
+function Start-Spinner {
+    param([string]$Message)
+    if ([Console]::IsOutputRedirected) { return }   # skip when output is piped
+    $script:SpinnerDone = [System.Threading.ManualResetEventSlim]::new($false)
+    $state = [PSCustomObject]@{ Done = $script:SpinnerDone; Message = $Message }
+    $script:SpinnerThread = [System.Threading.Thread]::new(
+        [System.Threading.ParameterizedThreadStart]{
+            param($s)
+            $frames = [string[]]@('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
+            $i = 0
+            while (-not $s.Done.IsSet) {
+                [Console]::Write("`r  " + $frames[$i % 10] + " " + $s.Message)
+                [System.Threading.Thread]::Sleep(100)
+                $i++
+            }
+            [Console]::Write("`r" + (' ' * ($s.Message.Length + 6)) + "`r")
+        }
+    )
+    $script:SpinnerThread.IsBackground = $true
+    $script:SpinnerThread.Start($state)
+}
+
+function Stop-Spinner {
+    if ($null -eq $script:SpinnerDone) { return }
+    $script:SpinnerDone.Set()
+    if ($script:SpinnerThread) {
+        $script:SpinnerThread.Join(2000) | Out-Null
+        $script:SpinnerThread = $null
+    }
+    $script:SpinnerDone.Dispose()
+    $script:SpinnerDone = $null
+}
+
 # Read a single key from .env; returns empty string if absent or a placeholder
 function Read-EnvValue ($key) {
     if (-not (Test-Path $EnvFile)) { return "" }
@@ -317,6 +354,7 @@ if ($Update) {
     Write-Host ""
 
     # Restart running services so they pick up the new .env
+    Start-Spinner "Restarting services..."
     $reloadCount = 0
     foreach ($t in $Tasks) {
         $task = Get-ScheduledTask -TaskName $t.Name -ErrorAction SilentlyContinue
@@ -337,6 +375,7 @@ if ($Update) {
             $reloadCount++
         }
     }
+    Stop-Spinner
     if ($reloadCount -gt 0) {
         Write-OK "Services restarted with new settings"
     } else {
@@ -362,6 +401,13 @@ if ($build -lt 17763) {
 Write-OK "Windows build $build"
 
 # -- Find Python 3.8+ ---------------------------------------------------------
+# On Windows the Python executable name is not standardised:
+#   "python"  — default when installed via python.org or winget
+#   "python3" — available when installed via the Microsoft Store
+#   "py"      — the Python Launcher (pyenv-win / official installer)
+# We probe all three so the scripts work regardless of how Python was installed.
+# macOS/Linux scripts use only "python3" because that is the unambiguous name
+# on Unix-like platforms (see platforms/macos/install.sh).
 Write-Step "Locating Python 3.8+"
 $pythonExe = $null
 foreach ($cmd in @("python", "python3", "py")) {
@@ -387,6 +433,7 @@ if (-not (Test-Path $pythonwExe)) { $pythonwExe = $pythonExe }
 
 # -- pip upgrade + install ------------------------------------------------------
 Write-Step "Installing Python packages"
+Start-Spinner "Installing Python packages..."
 # Upgrade pip quietly. Temporarily suspend Stop-on-error: with
 # $ErrorActionPreference='Stop', any pip stderr (including harmless warnings
 # about invalid distributions or the scripts PATH) becomes a terminating error.
@@ -395,7 +442,9 @@ $ErrorActionPreference = 'Continue'
 & $pythonExe -m pip install --upgrade pip --quiet 2>&1 | Out-Null
 $ErrorActionPreference = $_prev
 & $pythonExe -m pip install -r "$RepoRoot\requirements.txt" --quiet
-if ($LASTEXITCODE -ne 0) { Fail "pip install failed - see output above." }
+$pipExit = $LASTEXITCODE
+Stop-Spinner
+if ($pipExit -ne 0) { Fail "pip install failed - see output above." }
 Write-OK "Packages installed"
 
 # -- Ensure .env.template exists -----------------------------------------------
@@ -581,12 +630,15 @@ if (-not $Reinstall) {
     $openAiKey = Read-EnvValue "OPENAI_API_KEY"
     if ($openAiKey) {
         Write-Step "Validating OpenAI API key"
+        Start-Spinner "Validating OpenAI API key..."
         try {
             $response = Invoke-WebRequest -Uri "https://api.openai.com/v1/models" `
                 -Headers @{ Authorization = "Bearer $openAiKey" } `
                 -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
+            Stop-Spinner
             Write-OK "OpenAI API key valid"
         } catch {
+            Stop-Spinner
             $statusCode = $_.Exception.Response.StatusCode.value__
             if ($statusCode -eq 401) {
                 Fail "OpenAI API key is invalid (HTTP 401). Update OPENAI_API_KEY in .env and re-run."
@@ -602,6 +654,7 @@ if (-not $Reinstall) {
 
     # -- Validate SMTP ---------------------------------------------------------
     Write-Step "Validating SMTP connection"
+    Start-Spinner "Testing SMTP connection..."
     $smtpResult = & $pythonExe -c @"
 import smtplib, ssl, sys
 try:
@@ -624,6 +677,7 @@ except Exception as e:
     print('FAIL: ' + str(e))
 "@ 2>&1
 
+    Stop-Spinner
     if ($smtpResult -match "^OK") {
         Write-OK "SMTP connection verified"
     } elseif ($smtpResult -match "AUTH_FAILED") {
@@ -670,6 +724,7 @@ except Exception as e:
 
 # -- Register Task Scheduler tasks ---------------------------------------------
 Write-Step "Registering Task Scheduler tasks"
+Start-Spinner "Registering scheduled tasks..."
 $user = "$env:USERDOMAIN\$env:USERNAME"
 
 foreach ($t in $Tasks) {
@@ -698,22 +753,29 @@ foreach ($t in $Tasks) {
         -Settings  $settings `
         -RunLevel  Limited `
         -Force | Out-Null
-
+}
+Stop-Spinner
+foreach ($t in $Tasks) {
     Write-OK "Registered: $($t.Name)"
 }
 
 # -- Start tasks ---------------------------------------------------------------
 Write-Step "Starting services"
+Start-Spinner "Starting Vigil services..."
 foreach ($t in $Tasks) {
     Start-ScheduledTask -TaskName $t.Name -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 500
 }
 Start-Sleep -Seconds 2
+Stop-Spinner
 
 # -- Send confirmation email ---------------------------------------------------
 Write-Step "Sending confirmation email"
+Start-Spinner "Sending confirmation email..."
 $confirmResult = & $pythonExe "$RepoRoot\summarizer.py" "--confirm" 2>&1
-if ($LASTEXITCODE -eq 0) {
+$confirmExit = $LASTEXITCODE
+Stop-Spinner
+if ($confirmExit -eq 0) {
     Write-OK "Confirmation email sent"
 } else {
     Write-Warn "Confirmation email failed - check your SMTP credentials."

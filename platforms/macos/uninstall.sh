@@ -12,6 +12,30 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[uninstall]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[uninstall]${NC} $*"; }
 
+# ── Spinner (animated indicator for long-running operations) ───────────────
+_SPIN_PID=""
+_start_spinner() {
+    [[ -t 1 ]] || return 0   # skip when output is not a terminal
+    local msg="$1"
+    ( local i=0 frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+      while true; do
+          printf "\r  ${GREEN}%s${NC} %s" "${frames:$(( i % ${#frames} )):1}" "$msg"
+          sleep 0.1
+          i=$(( i + 1 ))
+      done
+    ) &
+    _SPIN_PID=$!
+}
+_stop_spinner() {
+    if [[ -n "${_SPIN_PID:-}" ]]; then
+        kill "$_SPIN_PID" 2>/dev/null || true
+        wait "$_SPIN_PID" 2>/dev/null || true
+        printf "\r\033[2K"
+        _SPIN_PID=""
+    fi
+}
+trap '_stop_spinner' EXIT
+
 # Detect macOS major version for launchctl compatibility
 MACOS_MAJOR=$(sw_vers -productVersion | cut -d. -f1)
 USER_UID=$(id -u)
@@ -26,6 +50,10 @@ launchctl_unload() {
 }
 
 # ── Partner PIN check (must pass before anything is removed) ──────────────
+# We look up "python3" explicitly — not "python" — because on macOS "python"
+# historically pointed to Python 2 and may not exist on modern systems.
+# (Windows scripts probe "python", "python3", and "py" in order because the
+# executable name varies by installer; see platforms/windows/uninstall.ps1)
 if command -v pyenv &>/dev/null; then
     _PYTHON_PATH="$(pyenv which python3 2>/dev/null)" || _PYTHON_PATH="$(command -v python3 2>/dev/null || true)"
 else
@@ -55,7 +83,11 @@ if [[ -f "$ENV_FILE" ]]; then
     # shellcheck disable=SC1090
     source "$ENV_FILE"
     set +a
-    if "$PYTHON_PATH" "$REPO_ROOT/summarizer.py" --uninstall-notify; then
+    _start_spinner "Sending uninstall notification email..."
+    _notify_result=0
+    "$PYTHON_PATH" "$REPO_ROOT/summarizer.py" --uninstall-notify || _notify_result=$?
+    _stop_spinner
+    if (( _notify_result == 0 )); then
         info "Uninstall notification sent."
     else
         warn "Could not send uninstall notification — continuing with uninstall."

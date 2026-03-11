@@ -40,11 +40,51 @@ $TaskNames = @("Vigil Tracker", "Vigil Summarizer")
 function Write-OK   { param($msg) Write-Host "  [OK] $msg" -ForegroundColor Green }
 function Write-Warn { param($msg) Write-Host "  [!]  $msg" -ForegroundColor Yellow }
 
+# ── Spinner (animated indicator for long-running operations) ─────────────
+$script:SpinnerThread = $null
+$script:SpinnerDone   = $null
+
+function Start-Spinner {
+    param([string]$Message)
+    if ([Console]::IsOutputRedirected) { return }   # skip when output is piped
+    $script:SpinnerDone = [System.Threading.ManualResetEventSlim]::new($false)
+    $state = [PSCustomObject]@{ Done = $script:SpinnerDone; Message = $Message }
+    $script:SpinnerThread = [System.Threading.Thread]::new(
+        [System.Threading.ParameterizedThreadStart]{
+            param($s)
+            $frames = [string[]]@('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
+            $i = 0
+            while (-not $s.Done.IsSet) {
+                [Console]::Write("`r  " + $frames[$i % 10] + " " + $s.Message)
+                [System.Threading.Thread]::Sleep(100)
+                $i++
+            }
+            [Console]::Write("`r" + (' ' * ($s.Message.Length + 6)) + "`r")
+        }
+    )
+    $script:SpinnerThread.IsBackground = $true
+    $script:SpinnerThread.Start($state)
+}
+
+function Stop-Spinner {
+    if ($null -eq $script:SpinnerDone) { return }
+    $script:SpinnerDone.Set()
+    if ($script:SpinnerThread) {
+        $script:SpinnerThread.Join(2000) | Out-Null
+        $script:SpinnerThread = $null
+    }
+    $script:SpinnerDone.Dispose()
+    $script:SpinnerDone = $null
+}
+
 Write-Host ""
 Write-Host "  ====  Vigil - Uninstall  ====" -ForegroundColor Cyan
 Write-Host ""
 
 # -- Partner PIN check (must pass before anything is removed) ------------------
+# Probe multiple executable names because the Python binary name varies on
+# Windows depending on how it was installed ("python", "python3", or "py").
+# See the "Find Python 3.8+" comment in install.ps1 for a full explanation.
 $pinPythonExe = $null
 foreach ($cmd in @("python", "python3", "py")) {
     try {
@@ -71,7 +111,7 @@ if ($pinPythonExe) {
 # -- Send uninstall notification email (before stopping services / deleting .env) --
 # Mirrors uninstall.sh which calls:  python3 summarizer.py --uninstall-notify
 if (Test-Path $EnvFile) {
-    # Find python3 the same way install.ps1 does
+    # Probe the same candidate names as install.ps1 (python / python3 / py).
     $pythonExe = $null
     foreach ($cmd in @("python", "python3", "py")) {
         try {
@@ -87,9 +127,11 @@ if (Test-Path $EnvFile) {
     }
 
     if ($pythonExe) {
-        Write-Host "  Sending uninstall notification email..." -ForegroundColor Cyan
+        Start-Spinner "Sending uninstall notification email..."
         & $pythonExe "$RepoRoot\summarizer.py" "--uninstall-notify" 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) {
+        $notifyExit = $LASTEXITCODE
+        Stop-Spinner
+        if ($notifyExit -eq 0) {
             Write-OK "Uninstall notification sent."
         } else {
             Write-Warn "Could not send uninstall notification - continuing with uninstall."

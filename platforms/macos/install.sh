@@ -24,6 +24,30 @@ warn()  { echo -e "${YELLOW}[install]${NC} $*"; }
 error() { echo -e "${RED}[install]${NC} $*" >&2; exit 1; }
 step()  { echo -e "\n${BOLD}${CYAN}▶  $*${NC}"; }
 
+# ── Spinner (animated indicator for long-running operations) ───────────────
+_SPIN_PID=""
+_start_spinner() {
+    [[ -t 1 ]] || return 0   # skip when output is not a terminal
+    local msg="$1"
+    ( local i=0 frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+      while true; do
+          printf "\r  ${CYAN}%s${NC} %s" "${frames:$(( i % ${#frames} )):1}" "$msg"
+          sleep 0.1
+          i=$(( i + 1 ))
+      done
+    ) &
+    _SPIN_PID=$!
+}
+_stop_spinner() {
+    if [[ -n "${_SPIN_PID:-}" ]]; then
+        kill "$_SPIN_PID" 2>/dev/null || true
+        wait "$_SPIN_PID" 2>/dev/null || true
+        printf "\r\033[2K"
+        _SPIN_PID=""
+    fi
+}
+trap '_stop_spinner' EXIT
+
 # ── macOS check ────────────────────────────────────────────────────────────
 [[ "$(uname -s)" != "Darwin" ]] && error "This installer only supports macOS."
 
@@ -313,6 +337,7 @@ PYEOF
     echo ""
 
     # ── Reload running services ────────────────────────────────────────────
+    _start_spinner "Reloading services..."
     RELOAD_COUNT=0
     for plist_dst in \
         "$LAUNCH_AGENTS_DIR/com.vigil.tracker.plist" \
@@ -323,6 +348,7 @@ PYEOF
             (( RELOAD_COUNT++ )) || true
         fi
     done
+    _stop_spinner
 
     if (( RELOAD_COUNT > 0 )); then
         info "Services reloaded with new settings ✓"
@@ -347,6 +373,11 @@ fi
 step "Checking prerequisites..."
 
 # python3 — resolve the real binary so launchd can find it without PATH shims
+# We use "python3" exclusively on macOS/Linux because:
+#   - "python" historically pointed to Python 2 on macOS and may be absent on
+#     modern systems where Python 2 is no longer shipped.
+#   - "python3" is the unambiguous, standard name on Unix-like platforms.
+# (Windows scripts use a broader probe — see platforms/windows/install.ps1)
 if command -v pyenv &>/dev/null; then
     PYTHON_PATH="$(pyenv which python3 2>/dev/null)" || PYTHON_PATH="$(command -v python3)"
 else
@@ -634,9 +665,11 @@ if [[ "$REINSTALL" == false ]]; then
 step "Validating credentials..."
 
 if [[ -n "$OPENAI_API_KEY" ]]; then
+    _start_spinner "Validating OpenAI API key..."
     OPENAI_HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
         -H "Authorization: Bearer ${OPENAI_API_KEY}" \
         "https://api.openai.com/v1/models" 2>/dev/null || echo "000")
+    _stop_spinner
     # 200 = valid; 403 = valid key but account/project restricted on this endpoint;
     # 429 = valid key, rate limited — all mean the key itself is accepted.
     if [[ "$OPENAI_HTTP" == "200" || "$OPENAI_HTTP" == "403" || "$OPENAI_HTTP" == "429" ]]; then
@@ -651,6 +684,7 @@ else
 fi
 
 # Test SMTP credentials by connecting and authenticating (no email sent)
+_start_spinner "Validating SMTP credentials..."
 SMTP_TEST=$("$PYTHON_PATH" - \
     "${SMTP_HOST}" "${SMTP_PORT:-587}" "${SMTP_USER}" "${SMTP_PASS}" <<'PYEOF' 2>&1 || true
 import smtplib, ssl, sys
@@ -670,6 +704,7 @@ except Exception as e:
     print(f"error: {e}"); sys.exit(2)
 PYEOF
 )
+_stop_spinner
 if [[ "$SMTP_TEST" == "ok" ]]; then
     info "SMTP credentials valid ✓"
 elif [[ "$SMTP_TEST" == "auth_failed" ]]; then
@@ -712,15 +747,19 @@ fi # end REINSTALL=false validation block
 step "Setting up Python environment..."
 VENV_DIR="$REPO_ROOT/.venv"
 if [[ ! -d "$VENV_DIR" ]]; then
+    _start_spinner "Creating virtual environment..."
     "$PYTHON_PATH" -m venv "$VENV_DIR"
+    _stop_spinner
     info "Created virtual environment at .venv ✓"
 else
     info "Virtual environment already exists ✓"
 fi
 # Use the venv Python for everything from here on (services, fill_plist, email)
 PYTHON_PATH="$VENV_DIR/bin/python3"
+_start_spinner "Installing Python packages..."
 "$PYTHON_PATH" -m pip install -q --upgrade pip
 "$PYTHON_PATH" -m pip install -q -r "$REPO_ROOT/requirements.txt"
+_stop_spinner
 info "Dependencies installed ✓"
 
 # ── Helper: fill plist templates ───────────────────────────────────────────
@@ -765,13 +804,13 @@ done
 
 # ── Install tracker service ────────────────────────────────────────────────
 step "Installing launchd services..."
+_start_spinner "Registering and starting launchd services..."
 
 WEB_PLIST_SRC="$SCRIPT_DIR/com.vigil.tracker.plist"
 WEB_PLIST_DST="$LAUNCH_AGENTS_DIR/com.vigil.tracker.plist"
 launchctl_unload "$WEB_PLIST_DST"
 fill_plist "$WEB_PLIST_SRC" "$WEB_PLIST_DST"
 launchctl_load "$WEB_PLIST_DST"
-info "Tracker service installed and started (com.vigil.tracker) ✓"
 
 # ── Install summarizer service ─────────────────────────────────────────────
 SUMMARY_PLIST_SRC="$SCRIPT_DIR/com.vigil.summarizer.plist"
@@ -779,11 +818,17 @@ SUMMARY_PLIST_DST="$LAUNCH_AGENTS_DIR/com.vigil.summarizer.plist"
 launchctl_unload "$SUMMARY_PLIST_DST"
 fill_plist "$SUMMARY_PLIST_SRC" "$SUMMARY_PLIST_DST"
 launchctl_load "$SUMMARY_PLIST_DST"
+_stop_spinner
+info "Tracker service installed and started (com.vigil.tracker) ✓"
 info "Summarizer service installed (com.vigil.summarizer) — schedule: ${SUMMARY_SCHEDULE} ✓"
 
 # ── Send confirmation email ────────────────────────────────────────────────
 step "Sending confirmation email..."
-if "$PYTHON_PATH" "$REPO_ROOT/summarizer.py" --confirm; then
+_start_spinner "Sending..."
+_confirm_result=0
+"$PYTHON_PATH" "$REPO_ROOT/summarizer.py" --confirm || _confirm_result=$?
+_stop_spinner
+if (( _confirm_result == 0 )); then
     info "Confirmation email sent to ${SMTP_TO} ✓"
 else
     warn "Confirmation email failed — check your SMTP credentials."
