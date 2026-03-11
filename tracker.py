@@ -41,6 +41,12 @@ PID_FILE = APP_SUPPORT_DIR / "tracker.pid"
 _running = True
 _current_session: Optional[dict] = None  # accessible by SIGTERM handler
 
+# ---------------------------------------------------------------------------
+# Incremental SHA-256 state — avoids re-reading the full log on every write
+# ---------------------------------------------------------------------------
+_integrity_hasher = None   # hashlib.sha256 object kept alive in memory
+_integrity_file_offset: int = 0  # byte offset up to which we've hashed
+
 # Rotating file logger — 5 MB per file, keep 3 backups
 _handler = RotatingFileHandler(DAEMON_LOG, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
 _handler.setFormatter(logging.Formatter("[%(asctime)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
@@ -100,13 +106,48 @@ signal.signal(signal.SIGINT,  _handle_signal)
 # Integrity
 # ---------------------------------------------------------------------------
 
-def _update_integrity_hash():
-    """Recompute and store the SHA-256 of the activity log."""
+def _update_integrity_hash() -> None:
+    """Incrementally update the SHA-256 sidecar — only reads newly appended bytes.
+
+    Keeps a hashlib object alive in memory so each call only hashes the delta
+    since the last write.  On cold start (or after an external file rewrite such
+    as log cleanup) it falls back to a full chunked read.  Uses .copy() to
+    snapshot the running state for writing so the hasher is never mutated.
+    """
+    global _integrity_hasher, _integrity_file_offset
     try:
-        digest = hashlib.sha256(ACTIVITY_LOG.read_bytes()).hexdigest()
-        INTEGRITY_FILE.write_text(digest)
+        if not ACTIVITY_LOG.exists():
+            return
+        current_size = ACTIVITY_LOG.stat().st_size
+
+        # File was truncated/replaced externally (e.g. log-retention cleanup) —
+        # reset so the next branch does a full rehash from the new content.
+        if _integrity_hasher is not None and current_size < _integrity_file_offset:
+            _integrity_hasher = None
+            _integrity_file_offset = 0
+
+        if _integrity_hasher is None:
+            # Cold start: hash the entire file in 64 KB chunks to cap RAM use.
+            h = hashlib.sha256()
+            with open(ACTIVITY_LOG, "rb") as f:
+                for chunk in iter(lambda: f.read(65536), b""):
+                    h.update(chunk)
+            _integrity_hasher = h
+            _integrity_file_offset = current_size
+        elif current_size > _integrity_file_offset:
+            # Incremental path: only hash the bytes appended since last call.
+            with open(ACTIVITY_LOG, "rb") as f:
+                f.seek(_integrity_file_offset)
+                new_bytes = f.read(current_size - _integrity_file_offset)
+            _integrity_hasher.update(new_bytes)
+            _integrity_file_offset = current_size
+
+        # .copy() snapshots internal state without mutating the running hasher.
+        INTEGRITY_FILE.write_text(_integrity_hasher.copy().hexdigest())
     except Exception:
-        pass
+        # Reset on any error; next call will cold-start cleanly.
+        _integrity_hasher = None
+        _integrity_file_offset = 0
 
 
 # ---------------------------------------------------------------------------

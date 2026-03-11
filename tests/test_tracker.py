@@ -320,3 +320,182 @@ class TestGetActiveTabAppleScript:
         script = tracker_macos.get_active_tab_applescript()
         assert "System Events" in script
         assert "frontmost" in script
+
+
+# ---------------------------------------------------------------------------
+# _update_integrity_hash — incremental hashing behaviour
+# ---------------------------------------------------------------------------
+
+class TestUpdateIntegrityHashIncremental:
+    """Tests for the new incremental SHA-256 logic added in the performance fix."""
+
+    def _setup(self, tmp_path, monkeypatch):
+        log = tmp_path / "activity_log.txt"
+        integrity = tmp_path / "activity_log.txt.sha256"
+        monkeypatch.setattr(tracker, "ACTIVITY_LOG", log)
+        monkeypatch.setattr(tracker, "INTEGRITY_FILE", integrity)
+        return log, integrity
+
+    def test_incremental_append_matches_full_hash(self, tmp_path, monkeypatch):
+        """Hash after appending must equal sha256 of the whole file."""
+        log, integrity = self._setup(tmp_path, monkeypatch)
+
+        log.write_bytes(b"first line\n")
+        tracker._update_integrity_hash()
+        assert integrity.read_text().strip() == hashlib.sha256(b"first line\n").hexdigest()
+
+        with open(log, "ab") as f:
+            f.write(b"second line\n")
+        tracker._update_integrity_hash()
+
+        expected = hashlib.sha256(b"first line\nsecond line\n").hexdigest()
+        assert integrity.read_text().strip() == expected
+
+    def test_multiple_appends_remain_consistent(self, tmp_path, monkeypatch):
+        """Three successive appends must all match a fresh full-file hash."""
+        log, integrity = self._setup(tmp_path, monkeypatch)
+
+        log.write_bytes(b"")
+        tracker._update_integrity_hash()
+
+        content = b""
+        for chunk in [b"line1\n", b"line2\n", b"line3\n"]:
+            content += chunk
+            with open(log, "ab") as f:
+                f.write(chunk)
+            tracker._update_integrity_hash()
+            assert integrity.read_text().strip() == hashlib.sha256(content).hexdigest()
+
+    def test_truncation_resets_and_hashes_new_content(self, tmp_path, monkeypatch):
+        """If the file shrinks (log-cleanup rewrite), hasher must reset."""
+        log, integrity = self._setup(tmp_path, monkeypatch)
+
+        # Start with large content so offset is well above the replacement size
+        log.write_bytes(b"x" * 200)
+        tracker._update_integrity_hash()
+        assert tracker._integrity_file_offset == 200
+
+        # Atomic rewrite with smaller content (mirrors summarizer _cleanup_old_entries)
+        log.write_bytes(b"new content\n")
+        tracker._update_integrity_hash()
+
+        expected = hashlib.sha256(b"new content\n").hexdigest()
+        assert integrity.read_text().strip() == expected
+
+    def test_no_extra_disk_read_when_size_unchanged(self, tmp_path, monkeypatch):
+        """Second call with no new bytes must not seek/read the file."""
+        log, integrity = self._setup(tmp_path, monkeypatch)
+
+        log.write_bytes(b"static content\n")
+        tracker._update_integrity_hash()
+        first = integrity.read_text().strip()
+
+        # File unchanged — incremental path should skip the file entirely
+        tracker._update_integrity_hash()
+        assert integrity.read_text().strip() == first
+
+    def test_hasher_state_preserved_across_calls(self, tmp_path, monkeypatch):
+        """_integrity_hasher object must not be replaced on incremental updates."""
+        log, integrity = self._setup(tmp_path, monkeypatch)
+
+        log.write_bytes(b"hello\n")
+        tracker._update_integrity_hash()
+        first_hasher = tracker._integrity_hasher
+
+        with open(log, "ab") as f:
+            f.write(b"world\n")
+        tracker._update_integrity_hash()
+
+        # Same object updated in-place — no new hasher created
+        assert tracker._integrity_hasher is first_hasher
+
+
+# ---------------------------------------------------------------------------
+# get_active_label PID-skip cache (macOS)
+# ---------------------------------------------------------------------------
+
+class TestGetActiveLabelPIDCache:
+    """Tests for the ObjC-bridge PID cache that avoids spawning osascript
+    when the frontmost application has not changed and is not a browser."""
+
+    def _mock_proc(self, output=""):
+        proc = MagicMock()
+        proc.communicate.return_value = (output, None)
+        return proc
+
+    def test_skips_osascript_when_pid_unchanged_and_non_browser(self, monkeypatch):
+        """Same non-browser PID → no subprocess, returns '' immediately."""
+        monkeypatch.setattr(tracker_macos, "_last_frontmost_pid", 42)
+        monkeypatch.setattr(tracker_macos, "_last_label", "")
+
+        with patch("platforms.macos.tracker_macos._get_frontmost_pid", return_value=42), \
+             patch("platforms.macos.tracker_macos.subprocess.Popen") as mock_popen:
+            result = tracker_macos.get_active_label()
+
+        mock_popen.assert_not_called()
+        assert result == ""
+
+    def test_runs_osascript_when_pid_changes(self, monkeypatch):
+        """New PID → osascript is spawned even if last label was ''."""
+        monkeypatch.setattr(tracker_macos, "_last_frontmost_pid", 42)
+        monkeypatch.setattr(tracker_macos, "_last_label", "")
+
+        with patch("platforms.macos.tracker_macos._get_frontmost_pid", return_value=99), \
+             patch("platforms.macos.tracker_macos.subprocess.Popen",
+                   return_value=self._mock_proc("")) as mock_popen:
+            result = tracker_macos.get_active_label()
+
+        mock_popen.assert_called_once()
+        assert result == ""
+
+    def test_runs_osascript_when_last_label_was_url(self, monkeypatch):
+        """Same PID but last result was a URL → must re-run (tab may have changed)."""
+        monkeypatch.setattr(tracker_macos, "_last_frontmost_pid", 42)
+        monkeypatch.setattr(tracker_macos, "_last_label", "[Safari] github.com")
+
+        with patch("platforms.macos.tracker_macos._get_frontmost_pid", return_value=42), \
+             patch("platforms.macos.tracker_macos.subprocess.Popen",
+                   return_value=self._mock_proc("[Safari] github.com/new")) as mock_popen:
+            result = tracker_macos.get_active_label()
+
+        mock_popen.assert_called_once()
+        assert result == "[Safari] github.com/new"
+
+    def test_runs_osascript_when_bridge_unavailable(self, monkeypatch):
+        """ObjC bridge failure (returns -1) → always run osascript as fallback."""
+        monkeypatch.setattr(tracker_macos, "_last_frontmost_pid", -1)
+        monkeypatch.setattr(tracker_macos, "_last_label", "")
+
+        with patch("platforms.macos.tracker_macos._get_frontmost_pid", return_value=-1), \
+             patch("platforms.macos.tracker_macos.subprocess.Popen",
+                   return_value=self._mock_proc("")) as mock_popen:
+            tracker_macos.get_active_label()
+
+        mock_popen.assert_called_once()
+
+    def test_cache_updated_after_osascript(self, monkeypatch):
+        """PID and label caches must reflect the result of the osascript call."""
+        monkeypatch.setattr(tracker_macos, "_last_frontmost_pid", -1)
+        monkeypatch.setattr(tracker_macos, "_last_label", "")
+
+        with patch("platforms.macos.tracker_macos._get_frontmost_pid", return_value=77), \
+             patch("platforms.macos.tracker_macos.subprocess.Popen",
+                   return_value=self._mock_proc("[Chrome] example.com")):
+            result = tracker_macos.get_active_label()
+
+        assert result == "[Chrome] example.com"
+        assert tracker_macos._last_frontmost_pid == 77
+        assert tracker_macos._last_label == "[Chrome] example.com"
+
+    def test_missing_value_sentinel_normalised_to_empty(self, monkeypatch):
+        """osascript 'missing value' output must be normalised to ''."""
+        monkeypatch.setattr(tracker_macos, "_last_frontmost_pid", -1)
+        monkeypatch.setattr(tracker_macos, "_last_label", "")
+
+        with patch("platforms.macos.tracker_macos._get_frontmost_pid", return_value=55), \
+             patch("platforms.macos.tracker_macos.subprocess.Popen",
+                   return_value=self._mock_proc("missing value")):
+            result = tracker_macos.get_active_label()
+
+        assert result == ""
+        assert tracker_macos._last_label == ""

@@ -4,6 +4,7 @@ tracker_macos.py — macOS-specific tracking implementation for Vigil.
 Provides:
   - Idle detection via CoreGraphics CGEventSourceSecondsSinceLastEventType
   - Active-window / browser-URL detection via AppleScript (osascript)
+  - Frontmost-app PID check via NSWorkspace ObjC bridge (no subprocess)
   - No-op exit-handler registration (SIGTERM is used on macOS, not atexit)
 
 Imported exclusively by tracker.py when sys.platform != "win32" so that
@@ -15,6 +16,7 @@ purposes (e.g. testing get_active_tab_applescript string building on Windows).
 """
 
 import ctypes
+import ctypes.util
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -132,8 +134,104 @@ return activeTab"""
 _APPLESCRIPT_SOURCE: str = get_active_tab_applescript()
 
 
+# ---------------------------------------------------------------------------
+# Frontmost-app PID via NSWorkspace ObjC bridge (no subprocess, ~microseconds)
+#
+# NSWorkspace.sharedWorkspace().frontmostApplication().processIdentifier()
+# is the standard macOS API for this.  We drive it through the ObjC runtime
+# directly with ctypes so there is zero process-spawning overhead.
+#
+# AppKit is loaded once to make NSWorkspace available.  Loading AppKit in a
+# background daemon is safe — the existing osascript calls already trigger the
+# same Cocoa infrastructure indirectly via System Events.  No Cocoa run-loop
+# is required for these calls.
+# ---------------------------------------------------------------------------
+
+_APPKIT_PATH = "/System/Library/Frameworks/AppKit.framework/AppKit"
+_LIBOBJC_PATH = "/usr/lib/libobjc.A.dylib"
+
+# ObjC runtime bridge — initialised once in _init_objc_bridge()
+_libobjc: Optional[ctypes.CDLL] = None
+_msg_voidp = None   # objc_msgSend typed wrapper → void*
+_msg_pid   = None   # objc_msgSend typed wrapper → pid_t (int32)
+_ws_class                : Optional[int] = None
+_sel_shared_workspace    : Optional[int] = None
+_sel_frontmost_app       : Optional[int] = None
+_sel_process_identifier  : Optional[int] = None
+
+
+def _init_objc_bridge() -> None:
+    """Initialise the NSWorkspace ObjC bridge (called once on first use)."""
+    global _libobjc, _msg_voidp, _msg_pid
+    global _ws_class, _sel_shared_workspace, _sel_frontmost_app, _sel_process_identifier
+
+    # Ensure AppKit is resident so NSWorkspace class is registered.
+    ctypes.CDLL(_APPKIT_PATH)
+
+    lib = ctypes.CDLL(_LIBOBJC_PATH)
+    lib.objc_getClass.restype   = ctypes.c_void_p
+    lib.objc_getClass.argtypes  = [ctypes.c_char_p]
+    lib.sel_registerName.restype  = ctypes.c_void_p
+    lib.sel_registerName.argtypes = [ctypes.c_char_p]
+
+    # Create separately-typed CFUNCTYPE wrappers that share the same underlying
+    # function pointer.  This avoids mutating lib.objc_msgSend's restype (which
+    # would be unsafe across threads) while still calling the same symbol.
+    raw_ptr = ctypes.cast(lib.objc_msgSend, ctypes.c_void_p).value
+    _msg_voidp = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)(raw_ptr)
+    _msg_pid   = ctypes.CFUNCTYPE(ctypes.c_int32,  ctypes.c_void_p, ctypes.c_void_p)(raw_ptr)
+
+    _ws_class               = lib.objc_getClass(b"NSWorkspace")
+    _sel_shared_workspace   = lib.sel_registerName(b"sharedWorkspace")
+    _sel_frontmost_app      = lib.sel_registerName(b"frontmostApplication")
+    _sel_process_identifier = lib.sel_registerName(b"processIdentifier")
+
+    _libobjc = lib
+
+
+def _get_frontmost_pid() -> int:
+    """Return the PID of the frontmost application (no subprocess, ~microseconds).
+
+    Uses NSWorkspace.sharedWorkspace().frontmostApplication().processIdentifier()
+    via the ObjC runtime.  Returns -1 on any failure so callers can treat it
+    as 'unknown' and fall through to osascript.
+    """
+    try:
+        if _libobjc is None:
+            _init_objc_bridge()
+        workspace = _msg_voidp(_ws_class, _sel_shared_workspace)
+        front_app = _msg_voidp(workspace, _sel_frontmost_app)
+        if not front_app:
+            return -1
+        return int(_msg_pid(front_app, _sel_process_identifier))
+    except Exception:
+        return -1
+
+
+# Per-tick cache — avoids spawning osascript when the frontmost app hasn't
+# changed and the previous result was "" (i.e. a non-browser app was active).
+_last_frontmost_pid: int = -1
+_last_label: str = ""
+
+
 def get_active_label() -> str:
-    """Return '[Browser] URL' or window title for the front application (macOS)."""
+    """Return '[Browser] URL' for the front application (macOS).
+
+    Checks the frontmost app PID first via a cheap ObjC call (~microseconds).
+    osascript is only spawned when the frontmost app has changed, or when the
+    previous result was a URL (the user may have switched tabs in the same
+    browser window).  For non-browser apps the label is always "" — once that
+    is cached, subsequent ticks skip the subprocess entirely until the app
+    changes.
+    """
+    global _last_frontmost_pid, _last_label
+
+    current_pid = _get_frontmost_pid()
+
+    # Skip osascript: same non-browser app as last tick — result is still "".
+    if current_pid != -1 and current_pid == _last_frontmost_pid and _last_label == "":
+        return ""
+
     proc = subprocess.Popen(
         ["osascript", "-e", _APPLESCRIPT_SOURCE],
         stdout=subprocess.PIPE,
@@ -142,7 +240,11 @@ def get_active_label() -> str:
     )
     out, _ = proc.communicate()
     label = out.strip() if out else ""
-    return "" if "missing value" in label else label
+    label = "" if "missing value" in label else label
+
+    _last_frontmost_pid = current_pid
+    _last_label = label
+    return label
 
 
 # ---------------------------------------------------------------------------

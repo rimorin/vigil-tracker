@@ -20,6 +20,9 @@ from unittest.mock import patch
 
 import pytest
 
+import tracker
+from platforms.macos import tracker_macos
+
 # Make the project root importable
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -48,3 +51,21 @@ def _block_all_external_io():
     yield
     p_smtp.stop()
     p_ssl.stop()
+
+
+@pytest.fixture(autouse=True)
+def _reset_module_globals():
+    """Reset module-level globals that would otherwise leak between tests.
+
+    * tracker._integrity_hasher / _integrity_file_offset  — incremental SHA-256
+    * tracker_macos._last_frontmost_pid / _last_label     — PID-skip cache
+    """
+    tracker._integrity_hasher = None
+    tracker._integrity_file_offset = 0
+    tracker_macos._last_frontmost_pid = -1
+    tracker_macos._last_label = ""
+    yield
+    tracker._integrity_hasher = None
+    tracker._integrity_file_offset = 0
+    tracker_macos._last_frontmost_pid = -1
+    tracker_macos._last_label = ""
