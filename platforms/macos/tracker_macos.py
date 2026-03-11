@@ -185,18 +185,15 @@ def get_active_label() -> str:
     frontmost app name and returns "" immediately for non-browser apps, so
     the per-call cost for non-browser apps is minimal (~50ms).
     """
-    import logging as _logging
     proc = subprocess.Popen(
         ["osascript", "-e", _APPLESCRIPT_SOURCE],
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
         text=True,
     )
-    out, err = proc.communicate()
+    out, _ = proc.communicate()
     label = out.strip() if out else ""
     label = "" if "missing value" in label else label
-    if err and err.strip():
-        _logging.getLogger("tracker").debug("osascript stderr: %r", err.strip())
     return label
 
 

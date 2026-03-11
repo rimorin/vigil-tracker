@@ -57,7 +57,7 @@ _integrity_file_offset: int = 0  # byte offset up to which we've hashed
 _handler = RotatingFileHandler(DAEMON_LOG, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
 _handler.setFormatter(logging.Formatter("[%(asctime)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
 _logger = logging.getLogger("tracker")
-_logger.setLevel(logging.DEBUG)
+_logger.setLevel(logging.INFO)
 _logger.addHandler(_handler)
 
 
@@ -263,7 +263,6 @@ def main():
 
     while _running:
         active_label = get_active_label()
-        _logger.debug("poll: label=%r", active_label)  # TODO: remove after debug
 
         idle_secs = get_idle_seconds()
         now = datetime.now()

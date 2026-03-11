@@ -73,6 +73,7 @@ Removing the hiding place — including incognito mode — is what breaks the cy
 | Microsoft Edge | ✅ | ✅ |
 | Brave | ✅ | ✅ |
 | Arc | ✅ | ✅ |
+| Comet (Perplexity) | ✅ | ✅ |
 | Firefox | ⚠️ Page title only | ⚠️ |
 | Opera | ⚠️ Page title only | ⚠️ |
 | Tor Browser | ⚠️ Page title only | ⚠️ |
@@ -300,12 +301,9 @@ brew install python
 
 #### 3. Browser access permissions
 
-Vigil uses macOS Automation to read browser tabs (including private windows). You need to grant Terminal access in your Mac's privacy settings.
+Vigil uses macOS Automation (AppleScript) to read browser tabs, including private windows. **No manual setup needed** — when the tracker starts for the first time, macOS will automatically prompt you to allow access for each browser you have installed. Just click **OK** on each dialog.
 
-- **macOS 13+:** System Settings → Privacy & Security → Accessibility → add Terminal, then Automation → allow Terminal to control your browsers.
-- **macOS 10.15–12:** System Preferences → Security & Privacy → Privacy → Accessibility → add Terminal, then Automation → allow Terminal to control your browsers.
-
-> `install.sh` will offer to open the correct settings screen for you.
+> If the dialogs don't appear, go to **System Settings → Privacy & Security → Automation** and verify that **python3** (or your Python version) has permission to control your browsers.
 
 ---
 
@@ -444,11 +442,12 @@ The installer will:
 1. Verify macOS version, Python, and required files
 2. Prompt for any missing credentials
 3. Validate your SMTP connection (and OpenAI key if provided)
-4. Open macOS privacy settings for browser access
-5. Install Python packages
-6. Invite your partner to set a PIN (stored securely in macOS Keychain — only they should know it)
-7. Start both background services (auto-restart on crash, auto-start on login)
-8. Send a confirmation email
+4. Install Python packages
+5. Invite your partner to set a PIN (stored securely in macOS Keychain — only they should know it)
+6. Start both background services (auto-restart on crash, auto-start on login)
+7. Send a confirmation email
+
+> **Permissions:** On first run, macOS will show dialogs asking Vigil to control your browsers. Click **OK** on each one — this is required for URL tracking.
 
 ```bash
 bash platforms/macos/install.sh --status   # check if services are running
@@ -505,6 +504,8 @@ platforms\windows\install.bat -Reinstall   # re-register tasks after moving the 
 ```bash
 bash platforms/macos/uninstall.sh
 ```
+
+The uninstaller will stop all services, optionally delete log files and settings, clear the partner PIN from Keychain, and offer to reset macOS Automation permissions granted to Vigil.
 
 ### Windows
 
