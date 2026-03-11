@@ -182,19 +182,21 @@ example-adult-site.com
 another-site.net
 ```
 
-**To replace the list with a fresh community blocklist**, download any plain-text domain blocklist and drop it in as `data/domains.txt`. A commonly used source:
+**To download a fresh community blocklist** (Steven Black's porn-only hosts list), use the built-in installer command:
 
 ```bash
-# Example — Steven Black's unified hosts list (porn category)
-curl -o data/domains.txt \
-  "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn-only/hosts"
-
-# Strip the hosts file format down to bare domains
-grep -v '^#' data/domains.txt | grep -v '^$' | awk '{print $2}' | grep -v '^0\.0\.0\.0$' > data/domains_clean.txt
-mv data/domains_clean.txt data/domains.txt
+# macOS
+bash platforms/macos/install.sh --blocklist
 ```
 
-> Vigil reads the blocklist once at startup. After editing `domains.txt`, restart the tracker service for changes to take effect.
+```powershell
+# Windows
+.\platforms\windows\install.ps1 -Blocklist
+```
+
+This downloads the latest list, strips it to bare domains, updates `data/domains.txt`, and restarts the tracker automatically.
+
+> Vigil reads the blocklist once at startup. After manually editing `domains.txt`, restart the tracker service for changes to take effect.
 >
 > **macOS:**
 > ```bash

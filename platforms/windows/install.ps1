@@ -15,6 +15,10 @@
 .PARAMETER Update
     Interactively update configuration settings and restart services.
 
+.PARAMETER Blocklist
+    Download a fresh domain blocklist (Steven Black's porn-only hosts list)
+    and restart the tracker service.
+
 .PARAMETER Reinstall
     Re-register tasks without re-prompting for .env values (useful after
     moving the project folder or upgrading Python).
@@ -23,6 +27,7 @@
     .\install.ps1
     .\install.ps1 -Status
     .\install.ps1 -Update
+    .\install.ps1 -Blocklist
     .\install.ps1 -Reinstall
 #>
 
@@ -30,6 +35,7 @@
 param(
     [switch]$Status,
     [switch]$Update,
+    [switch]$Blocklist,
     [switch]$Reinstall
 )
 
@@ -381,6 +387,60 @@ if ($Update) {
     } else {
         Write-Warn "No installed services found - run .\install.ps1 to install."
     }
+    Write-Host ""
+    exit 0
+}
+
+# ============================================================================
+# -Blocklist  (download fresh community blocklist and restart tracker)
+# ============================================================================
+if ($Blocklist) {
+    $BlocklistFile = Join-Path $RepoRoot "data\domains.txt"
+    $BlocklistUrl  = "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn-only/hosts"
+
+    Write-Host ""
+    Write-Host "  ====  Vigil - Update Domain Blocklist  ====" -ForegroundColor Green
+    Write-Host ""
+    Write-OK "Downloading blocklist from Steven Black's hosts list..."
+
+    $tmpFile = [System.IO.Path]::GetTempFileName()
+    try {
+        Invoke-WebRequest -Uri $BlocklistUrl -OutFile $tmpFile -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
+    } catch {
+        Remove-Item $tmpFile -ErrorAction SilentlyContinue
+        Fail "Download failed: $_"
+    }
+
+    # Strip hosts-file format to bare domains, drop the 0.0.0.0 placeholder line.
+    $domains = Get-Content $tmpFile |
+        Where-Object { $_ -notmatch '^\s*#' -and $_.Trim() -ne '' } |
+        ForEach-Object { ($_ -split '\s+')[-1] } |
+        Where-Object { $_ -ne '0.0.0.0' -and $_ -ne 'localhost' -and $_ -match '\.' }
+    Remove-Item $tmpFile -ErrorAction SilentlyContinue
+
+    $domains | Set-Content -Path $BlocklistFile -Encoding UTF8
+    $domainCount = ($domains | Measure-Object).Count
+    Write-OK "Blocklist updated - $domainCount domains"
+
+    # Restart the tracker task so it picks up the new blocklist.
+    $trackerTask = Get-ScheduledTask -TaskName "Vigil Tracker" -ErrorAction SilentlyContinue
+    if ($null -ne $trackerTask) {
+        Start-Spinner "Restarting tracker..."
+        Stop-ScheduledTask  -TaskName "Vigil Tracker" -ErrorAction SilentlyContinue
+        $elapsed = 0
+        while ($elapsed -lt 10) {
+            $state = (Get-ScheduledTask -TaskName "Vigil Tracker" -ErrorAction SilentlyContinue).State
+            if ($state -eq 'Ready') { break }
+            Start-Sleep -Milliseconds 500
+            $elapsed += 0.5
+        }
+        Start-ScheduledTask -TaskName "Vigil Tracker" -ErrorAction SilentlyContinue
+        Stop-Spinner
+        Write-OK "Tracker restarted - new blocklist is active"
+    } else {
+        Write-Warn "Tracker not installed yet. The new blocklist will be loaded on next install."
+    }
+
     Write-Host ""
     exit 0
 }
@@ -799,6 +859,7 @@ Write-Host ""
 Write-Host "  Tips:" -ForegroundColor Cyan
 Write-Host "    .\install.ps1 -Status     - check service health and settings"
 Write-Host "    .\install.ps1 -Update     - change settings and restart services"
+Write-Host "    .\install.ps1 -Blocklist  - download a fresh domain blocklist"
 Write-Host "    .\install.ps1 -Reinstall  - re-register tasks (e.g. after moving the folder)"
 Write-Host "    .\uninstall.ps1           - remove Vigil"
 Write-Host ""

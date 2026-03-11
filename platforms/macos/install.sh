@@ -5,6 +5,7 @@
 #   bash install.sh              — guided install (wizard prompts for any missing .env values)
 #   bash install.sh --status     — show service health and recent log output
 #   bash install.sh --update     — interactively update configuration settings and reload services
+#   bash install.sh --blocklist  — download a fresh domain blocklist and restart the tracker
 #   bash install.sh --reinstall  — re-fill plists and reload services (use after moving the project)
 
 set -euo pipefail
@@ -360,6 +361,44 @@ PYEOF
     exit 0
 fi
 
+# ── --blocklist flag ───────────────────────────────────────────────────────
+if [[ "${1:-}" == "--blocklist" ]]; then
+    BLOCKLIST_FILE="$REPO_ROOT/data/domains.txt"
+    BLOCKLIST_URL="https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn-only/hosts"
+
+    echo ""
+    echo -e "${BOLD}${GREEN}━━━━  Vigil — Update Domain Blocklist  ━━━━${NC}"
+    echo ""
+    info "Downloading blocklist from Steven Black's hosts list..."
+
+    curl -fsSL --max-time 60 "$BLOCKLIST_URL" -o "$BLOCKLIST_FILE" \
+        || error "Download failed. Check your internet connection and try again."
+
+    grep -v '^#' "$BLOCKLIST_FILE" | grep -v '^$' \
+        | awk '{print $2}' \
+        | grep -v '^0\.0\.0\.0$' \
+        > "${BLOCKLIST_FILE}.clean"
+    mv "${BLOCKLIST_FILE}.clean" "$BLOCKLIST_FILE"
+
+    DOMAIN_COUNT=$(wc -l < "$BLOCKLIST_FILE" | tr -d ' ')
+    info "Blocklist updated — ${DOMAIN_COUNT} domains ✓"
+
+    # Restart the tracker so it picks up the new blocklist.
+    TRACKER_PLIST="$LAUNCH_AGENTS_DIR/com.vigil.tracker.plist"
+    if [[ -f "$TRACKER_PLIST" ]]; then
+        _start_spinner "Restarting tracker..."
+        launchctl_unload "$TRACKER_PLIST"
+        launchctl_load   "$TRACKER_PLIST"
+        _stop_spinner
+        info "Tracker restarted — new blocklist is active ✓"
+    else
+        warn "Tracker not installed yet. The new blocklist will be loaded on next install."
+    fi
+
+    echo ""
+    exit 0
+fi
+
 # ── --reinstall flag ───────────────────────────────────────────────────────
 # Skips the setup wizard and credential checks.
 # Use after moving the project directory or to pick up code changes.
@@ -606,30 +645,6 @@ if [[ -z "$CURRENT_SCHEDULE" ]]; then
     echo ""
 fi
 
-# ── Partner PIN (optional) ─────────────────────────────────────────────────
-if ! "$PYTHON_PATH" "$REPO_ROOT/pin_auth.py" status &>/dev/null; then
-    echo ""
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}  🔒  Partner PIN (optional)${NC}"
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    echo "  A partner PIN adds a barrier against impulsive uninstallation."
-    echo "  Once set, the PIN must be entered to stop or remove Vigil."
-    echo "  Your accountability partner should be the one to choose the PIN."
-    echo ""
-    read -r -p "  Set a partner PIN now? [y/N]: " SET_PIN
-    if [[ "$SET_PIN" =~ ^[Yy]$ ]]; then
-        if "$PYTHON_PATH" "$REPO_ROOT/pin_auth.py" hash; then
-            info "Partner PIN set ✓"
-        else
-            warn "PIN setup cancelled — skipping."
-        fi
-    else
-        info "Skipping partner PIN — you can set one later by running: bash install.sh --update"
-    fi
-    echo ""
-fi
-
 fi # end REINSTALL=false wizard block
 
 # ── Load .env ──────────────────────────────────────────────────────────────
@@ -731,6 +746,30 @@ _start_spinner "Installing Python packages..."
 _stop_spinner
 info "Dependencies installed ✓"
 
+# ── Partner PIN (optional) ─────────────────────────────────────────────────
+if ! "$PYTHON_PATH" "$REPO_ROOT/pin_auth.py" status &>/dev/null; then
+    echo ""
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}  🔒  Partner PIN (optional)${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo "  A partner PIN adds a barrier against impulsive uninstallation."
+    echo "  Once set, the PIN must be entered to stop or remove Vigil."
+    echo "  Your accountability partner should be the one to choose the PIN."
+    echo ""
+    read -r -p "  Set a partner PIN now? [y/N]: " SET_PIN
+    if [[ "$SET_PIN" =~ ^[Yy]$ ]]; then
+        if "$PYTHON_PATH" "$REPO_ROOT/pin_auth.py" hash; then
+            info "Partner PIN set ✓"
+        else
+            warn "PIN setup cancelled — skipping."
+        fi
+    else
+        info "Skipping partner PIN — you can set one later by running: bash install.sh --update"
+    fi
+    echo ""
+fi
+
 # ── Helper: fill plist templates ───────────────────────────────────────────
 # Only PYTHON_PATH, PROJECT_DIR, and LOG_DIR are embedded in the plist.
 # All secrets (API keys, schedule) remain in .env and are loaded at runtime
@@ -813,6 +852,8 @@ echo ""
 echo "  Tracker logs    : ~/Library/Logs/Vigil/tracker_daemon.log"
 echo "  Summarizer logs : ~/Library/Logs/Vigil/summarizer_daemon.log"
 echo "  Check status    : bash $SCRIPT_DIR/install.sh --status"
+echo "  Update settings : bash $SCRIPT_DIR/install.sh --update"
+echo "  Manage blocklist: bash $SCRIPT_DIR/install.sh --blocklist"
 echo "  Reinstall       : bash $SCRIPT_DIR/install.sh --reinstall"
 echo "  To uninstall    : bash $SCRIPT_DIR/uninstall.sh"
 echo ""
