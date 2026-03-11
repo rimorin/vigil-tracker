@@ -67,7 +67,7 @@ def get_idle_seconds() -> float:
 # Chromium-based browsers that expose "active tab of front window" via AppleScript.
 # Arc's support is limited — wrapped in try/end try for silent fallback.
 # Vivaldi is excluded (known AppleScript gap — does not expose active tab URL).
-CHROMIUM_ACTIVE_TAB_BROWSERS = ["Google Chrome", "Microsoft Edge", "Brave Browser", "Arc"]
+CHROMIUM_ACTIVE_TAB_BROWSERS = ["Google Chrome", "Microsoft Edge", "Brave Browser", "Arc", "Comet"]
 
 
 def _installed_chromium_browsers() -> list:
@@ -135,115 +135,68 @@ _APPLESCRIPT_SOURCE: str = get_active_tab_applescript()
 
 
 # ---------------------------------------------------------------------------
-# Frontmost-app PID via NSWorkspace ObjC bridge (no subprocess, ~microseconds)
-#
-# NSWorkspace.sharedWorkspace().frontmostApplication().processIdentifier()
-# is the standard macOS API for this.  We drive it through the ObjC runtime
-# directly with ctypes so there is zero process-spawning overhead.
-#
-# AppKit is loaded once to make NSWorkspace available.  Loading AppKit in a
-# background daemon is safe — the existing osascript calls already trigger the
-# same Cocoa infrastructure indirectly via System Events.  No Cocoa run-loop
-# is required for these calls.
+# Startup permission probe — trigger TCC dialogs for all installed browsers
 # ---------------------------------------------------------------------------
 
-_APPKIT_PATH = "/System/Library/Frameworks/AppKit.framework/AppKit"
-_LIBOBJC_PATH = "/usr/lib/libobjc.A.dylib"
+def request_automation_permissions() -> None:
+    """Fire a real Apple Event at every installed browser unconditionally.
 
-# ObjC runtime bridge — initialised once in _init_objc_bridge()
-_libobjc: Optional[ctypes.CDLL] = None
-_msg_voidp = None   # objc_msgSend typed wrapper → void*
-_msg_pid   = None   # objc_msgSend typed wrapper → pid_t (int32)
-_ws_class                : Optional[int] = None
-_sel_shared_workspace    : Optional[int] = None
-_sel_frontmost_app       : Optional[int] = None
-_sel_process_identifier  : Optional[int] = None
+    macOS grants Automation permissions to the *responsible process* — the
+    process that owns the call chain through launchd → python → osascript.
+    When the daemon calls this at startup, any missing TCC entry triggers the
+    "python wants to control X" dialog attributed to python3.12 (correct).
 
+    We use 'count windows' because it sends an actual Apple Event that macOS
+    gates on TCC.  Commands like 'return name' are metadata lookups that bypass
+    TCC entirely and silently succeed without a grant.
 
-def _init_objc_bridge() -> None:
-    """Initialise the NSWorkspace ObjC bridge (called once on first use)."""
-    global _libobjc, _msg_voidp, _msg_pid
-    global _ws_class, _sel_shared_workspace, _sel_frontmost_app, _sel_process_identifier
-
-    # Ensure AppKit is resident so NSWorkspace class is registered.
-    ctypes.CDLL(_APPKIT_PATH)
-
-    lib = ctypes.CDLL(_LIBOBJC_PATH)
-    lib.objc_getClass.restype   = ctypes.c_void_p
-    lib.objc_getClass.argtypes  = [ctypes.c_char_p]
-    lib.sel_registerName.restype  = ctypes.c_void_p
-    lib.sel_registerName.argtypes = [ctypes.c_char_p]
-
-    # Create separately-typed CFUNCTYPE wrappers that share the same underlying
-    # function pointer.  This avoids mutating lib.objc_msgSend's restype (which
-    # would be unsafe across threads) while still calling the same symbol.
-    raw_ptr = ctypes.cast(lib.objc_msgSend, ctypes.c_void_p).value
-    _msg_voidp = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)(raw_ptr)
-    _msg_pid   = ctypes.CFUNCTYPE(ctypes.c_int32,  ctypes.c_void_p, ctypes.c_void_p)(raw_ptr)
-
-    _ws_class               = lib.objc_getClass(b"NSWorkspace")
-    _sel_shared_workspace   = lib.sel_registerName(b"sharedWorkspace")
-    _sel_frontmost_app      = lib.sel_registerName(b"frontmostApplication")
-    _sel_process_identifier = lib.sel_registerName(b"processIdentifier")
-
-    _libobjc = lib
-
-
-def _get_frontmost_pid() -> int:
-    """Return the PID of the frontmost application (no subprocess, ~microseconds).
-
-    Uses NSWorkspace.sharedWorkspace().frontmostApplication().processIdentifier()
-    via the ObjC runtime.  Returns -1 on any failure so callers can treat it
-    as 'unknown' and fall through to osascript.
+    A 3-second timeout per browser prevents startup from blocking indefinitely
+    if the app is unresponsive.
     """
-    try:
-        if _libobjc is None:
-            _init_objc_bridge()
-        workspace = _msg_voidp(_ws_class, _sel_shared_workspace)
-        front_app = _msg_voidp(workspace, _sel_frontmost_app)
-        if not front_app:
-            return -1
-        return int(_msg_pid(front_app, _sel_process_identifier))
-    except Exception:
-        return -1
+    # System Events must be probed first — the main AppleScript uses it to
+    # detect the frontmost app name.  Without this grant the browser blocks
+    # never execute (the try/catch silently swallows the TCC error).
+    targets = (
+        [("System Events", "get name of first application process whose frontmost is true")]
+        + [(b, "count windows") for b in ["Safari"] + _installed_chromium_browsers()]
+    )
+    for app, cmd in targets:
+        script = f'tell application "{app}" to {cmd}'
+        try:
+            subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True,
+                timeout=3,
+            )
+        except subprocess.TimeoutExpired:
+            pass
+        except Exception:
+            pass
 
 
-# Per-tick cache — avoids spawning osascript when the frontmost app hasn't
-# changed and the previous result was "" (i.e. a non-browser app was active).
-_last_frontmost_pid: int = -1
-_last_label: str = ""
-
+_BROWSER_NAMES: frozenset = frozenset(
+    ["Safari"] + CHROMIUM_ACTIVE_TAB_BROWSERS
+)
 
 def get_active_label() -> str:
     """Return '[Browser] URL' for the front application (macOS).
 
-    Checks the frontmost app PID first via a cheap ObjC call (~microseconds).
-    osascript is only spawned when the frontmost app has changed, or when the
-    previous result was a URL (the user may have switched tabs in the same
-    browser window).  For non-browser apps the label is always "" — once that
-    is cached, subsequent ticks skip the subprocess entirely until the app
-    changes.
+    Runs osascript every tick. The AppleScript queries System Events for the
+    frontmost app name and returns "" immediately for non-browser apps, so
+    the per-call cost for non-browser apps is minimal (~50ms).
     """
-    global _last_frontmost_pid, _last_label
-
-    current_pid = _get_frontmost_pid()
-
-    # Skip osascript: same non-browser app as last tick — result is still "".
-    if current_pid != -1 and current_pid == _last_frontmost_pid and _last_label == "":
-        return ""
-
+    import logging as _logging
     proc = subprocess.Popen(
         ["osascript", "-e", _APPLESCRIPT_SOURCE],
         stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
         text=True,
     )
-    out, _ = proc.communicate()
+    out, err = proc.communicate()
     label = out.strip() if out else ""
     label = "" if "missing value" in label else label
-
-    _last_frontmost_pid = current_pid
-    _last_label = label
+    if err and err.strip():
+        _logging.getLogger("tracker").debug("osascript stderr: %r", err.strip())
     return label
 
 

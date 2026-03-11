@@ -27,6 +27,12 @@ else:
 get_idle_seconds = _platform.get_idle_seconds
 get_active_label = _platform.get_active_label
 
+# Trigger TCC Automation dialogs for all installed browsers at startup so that
+# macOS attributes the grants to python3.12 (the daemon process) rather than
+# to whichever terminal happened to run an earlier install/test command.
+if hasattr(_platform, "request_automation_permissions"):
+    _platform.request_automation_permissions()
+
 
 APP_SUPPORT_DIR, LOG_DIR = get_app_dirs()
 APP_SUPPORT_DIR.mkdir(parents=True, exist_ok=True)
@@ -51,7 +57,7 @@ _integrity_file_offset: int = 0  # byte offset up to which we've hashed
 _handler = RotatingFileHandler(DAEMON_LOG, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
 _handler.setFormatter(logging.Formatter("[%(asctime)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
 _logger = logging.getLogger("tracker")
-_logger.setLevel(logging.INFO)
+_logger.setLevel(logging.DEBUG)
 _logger.addHandler(_handler)
 
 
@@ -257,6 +263,7 @@ def main():
 
     while _running:
         active_label = get_active_label()
+        _logger.debug("poll: label=%r", active_label)  # TODO: remove after debug
 
         idle_secs = get_idle_seconds()
         now = datetime.now()

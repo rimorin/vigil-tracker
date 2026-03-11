@@ -361,7 +361,7 @@ PYEOF
 fi
 
 # ── --reinstall flag ───────────────────────────────────────────────────────
-# Skips the setup wizard, credential checks, and permission prompt.
+# Skips the setup wizard and credential checks.
 # Use after moving the project directory or to pick up code changes.
 REINSTALL=false
 if [[ "${1:-}" == "--reinstall" ]]; then
@@ -708,34 +708,6 @@ elif [[ "$SMTP_TEST" == "auth_failed" ]]; then
     error "SMTP authentication failed. Check SMTP_USER and SMTP_PASS in .env."
 else
     warn "Could not verify SMTP credentials: ${SMTP_TEST} — check your internet connection."
-fi
-
-# ── macOS permission reminder ──────────────────────────────────────────────
-# Only show this if Accessibility permission hasn't been granted yet.
-# A successful osascript call to System Events confirms the permission is in place.
-if ! osascript -e 'tell application "System Events" to return count of processes' &>/dev/null; then
-    echo ""
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}  ⚙️   macOS permissions required (one-time setup)${NC}"
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    if (( MACOS_MAJOR >= 13 )); then
-        echo "  System Settings → Privacy & Security"
-    else
-        echo "  System Preferences → Security & Privacy → Privacy"
-    fi
-    echo "    • Accessibility  → add Terminal (or your terminal app)"
-    echo "    • Automation     → allow Terminal to control Safari, Chrome, etc."
-    echo ""
-    echo -e "  Press ${BOLD}Enter${NC} to open System Settings now, or type ${BOLD}s${NC} to skip."
-    read -r -p "  > " PERM_CHOICE
-    if [[ "${PERM_CHOICE,,}" != "s" ]]; then
-        open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility" 2>/dev/null || true
-        echo ""
-        read -r -p "  Press Enter once you have granted permissions to continue..."
-    fi
-else
-    info "macOS permissions already granted ✓"
 fi
 
 fi # end REINSTALL=false validation block

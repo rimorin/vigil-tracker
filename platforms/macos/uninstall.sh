@@ -158,6 +158,21 @@ if [[ -n "${_PYTHON_PATH:-}" ]]; then
     "$_PYTHON_PATH" "$REPO_ROOT/pin_auth.py" delete 2>/dev/null || true
 fi
 
+# ── Reset macOS Automation (TCC) permissions ──────────────────────────────
+# tccutil only accepts bundle IDs; python3.12 has none, so we must do a
+# full AppleEvents reset.  Warn the user before proceeding.
+echo ""
+read -r -p "$(echo -e "${YELLOW}Reset ALL macOS Automation permissions? (removes Vigil's grants; other apps may need to re-authorise)${NC} [y/N] ")" RESET_TCC
+if [[ "$RESET_TCC" =~ ^[Yy]$ ]]; then
+    if tccutil reset AppleEvents 2>/dev/null; then
+        info "Cleared macOS Automation permissions."
+    else
+        warn "Could not reset TCC permissions — remove manually in System Settings → Privacy & Security → Automation."
+    fi
+else
+    info "Skipped TCC reset — remove python3.12 entries manually if desired."
+fi
+
 # ── Optionally remove virtual environment ─────────────────────────────────
 if [[ -d "$VENV_DIR" ]]; then
     echo ""
