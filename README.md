@@ -289,7 +289,7 @@ ALERT_SCAN_INTERVAL_MINUTES=10  # less frequent; fine for most use cases
 #### 2. Python 3.8 or newer
 
 ```bash
-python3 --version
+python --version
 ```
 
 No Python? Install via [Homebrew](https://brew.sh):

@@ -168,7 +168,7 @@ if [[ "${1:-}" == "--update" ]]; then
         exit 1
     fi
 
-    # Inline helpers (use system python3; venv may not be set up yet)
+    # Inline helpers (use system python; venv may not be set up yet)
     _read_env() {
         local key="$1" val
         val=$(grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r')
@@ -178,7 +178,7 @@ if [[ "${1:-}" == "--update" ]]; then
     _write_env() {
         local key="$1" val="$2"
         if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
-            python3 - "$key" "$val" "$ENV_FILE" <<'PYEOF'
+            python - "$key" "$val" "$ENV_FILE" <<'PYEOF'
 import re, sys
 key, val, path = sys.argv[1], sys.argv[2], sys.argv[3]
 content = open(path).read()
@@ -372,18 +372,15 @@ fi
 # ── Prerequisites ──────────────────────────────────────────────────────────
 step "Checking prerequisites..."
 
-# python3 — resolve the real binary so launchd can find it without PATH shims
-# We use "python3" exclusively on macOS/Linux because:
-#   - "python" historically pointed to Python 2 on macOS and may be absent on
-#     modern systems where Python 2 is no longer shipped.
-#   - "python3" is the unambiguous, standard name on Unix-like platforms.
+# python — resolve the real binary so launchd can find it without PATH shims
+# We use "python" here to respect pyenv's active version.
 # (Windows scripts use a broader probe — see platforms/windows/install.ps1)
 if command -v pyenv &>/dev/null; then
-    PYTHON_PATH="$(pyenv which python3 2>/dev/null)" || PYTHON_PATH="$(command -v python3)"
+    PYTHON_PATH="$(pyenv which python 2>/dev/null)" || PYTHON_PATH="$(command -v python)"
 else
-    PYTHON_PATH="$(command -v python3)"
+    PYTHON_PATH="$(command -v python)"
 fi
-[[ -z "$PYTHON_PATH" ]] && error "python3 not found. Install it: brew install python"
+[[ -z "$PYTHON_PATH" ]] && error "python not found. Install it via pyenv or brew install python"
 
 # Python >= 3.8
 PY_VERSION="$("$PYTHON_PATH" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
@@ -755,7 +752,7 @@ else
     info "Virtual environment already exists ✓"
 fi
 # Use the venv Python for everything from here on (services, fill_plist, email)
-PYTHON_PATH="$VENV_DIR/bin/python3"
+PYTHON_PATH="$VENV_DIR/bin/python"
 _start_spinner "Installing Python packages..."
 "$PYTHON_PATH" -m pip install -q --upgrade pip
 "$PYTHON_PATH" -m pip install -q -r "$REPO_ROOT/requirements.txt"
