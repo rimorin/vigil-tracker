@@ -64,7 +64,7 @@ Vigil runs as a background service that periodically reads your browser history 
 
 ## ✨ Features
 
-- 🌐 **All major browsers** — full URLs in Safari, Chrome, Edge, Brave, and Arc on macOS; Chrome, Edge, Brave, Firefox and more on Windows. See [Supported Browsers](#-supported-browsers).
+- 🌐 **All major browsers** — full URLs in Safari, Chrome, Edge, Brave, Arc, and Opera on macOS; Chrome, Edge, Brave, Firefox and more on Windows. See [Supported Browsers](#-supported-browsers).
 - 🚨 **Periodic alerts** — the tracker tags each adult-site visit in the activity log with `[FLAGGED_CONTENT]`; a background scan runs every few minutes (configurable) and sends one consolidated alert email per cycle if any flagged visits are found. Works reliably on both macOS and Windows.
 - 🤖 **AI digest** *(optional)* — with an OpenAI key, summaries include categories, timeline highlights, and flagged content analysis. Without one, a plain visit list (domains, time spent, full log) is sent instead — no external calls needed.
 - 📧 **Email via your own account** — standard SMTP. Gmail, Outlook, iCloud, Fastmail — any provider works.
@@ -89,8 +89,8 @@ Vigil runs as a background service that periodically reads your browser history 
 | Brave | ✅ | ✅ |
 | Arc | ✅ | ✅ |
 | Comet (Perplexity) | ✅ | ✅ |
+| Opera | ✅ | ✅ |
 | Firefox | ⚠️ Page title only | ⚠️ |
-| Opera | ⚠️ Page title only | ⚠️ |
 | Tor Browser | ⚠️ Page title only | ⚠️ |
 
 ### Windows
