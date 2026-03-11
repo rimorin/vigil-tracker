@@ -169,6 +169,17 @@ if [[ "${1:-}" == "--update" ]]; then
         exit 1
     fi
 
+    # Resolve Python — prefer venv if already installed, fall back to system python
+    _VENV_DIR="$REPO_ROOT/.venv"
+    if [[ -x "$_VENV_DIR/bin/python" ]]; then
+        PYTHON_PATH="$_VENV_DIR/bin/python"
+    elif command -v pyenv &>/dev/null; then
+        PYTHON_PATH="$(pyenv which python 2>/dev/null)" || PYTHON_PATH="$(command -v python)"
+    else
+        PYTHON_PATH="$(command -v python)"
+    fi
+    [[ -z "$PYTHON_PATH" ]] && { echo "python not found — cannot manage partner PIN."; PYTHON_PATH="python"; }
+
     # Inline helpers (use system python; venv may not be set up yet)
     _read_env() {
         local key="$1" val
@@ -179,7 +190,7 @@ if [[ "${1:-}" == "--update" ]]; then
     _write_env() {
         local key="$1" val="$2"
         if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
-            python - "$key" "$val" "$ENV_FILE" <<'PYEOF'
+            "$PYTHON_PATH" - "$key" "$val" "$ENV_FILE" <<'PYEOF'
 import re, sys
 key, val, path = sys.argv[1], sys.argv[2], sys.argv[3]
 content = open(path).read()
