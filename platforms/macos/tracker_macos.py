@@ -66,8 +66,7 @@ def get_idle_seconds() -> float:
 
 # Chromium-based browsers that expose "active tab of front window" via AppleScript.
 # Arc's support is limited — wrapped in try/end try for silent fallback.
-# Vivaldi is excluded (known AppleScript gap — does not expose active tab URL).
-CHROMIUM_ACTIVE_TAB_BROWSERS = ["Google Chrome", "Microsoft Edge", "Brave Browser", "Arc", "Comet", "Opera"]
+CHROMIUM_ACTIVE_TAB_BROWSERS = ["Google Chrome", "Microsoft Edge", "Brave Browser", "Arc", "Comet", "Opera", "Vivaldi"]
 
 
 def _installed_chromium_browsers() -> list:

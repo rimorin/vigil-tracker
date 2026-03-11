@@ -90,6 +90,7 @@ Vigil runs as a background service that periodically reads your browser history 
 | Arc | ✅ | ✅ |
 | Comet (Perplexity) | ✅ | ✅ |
 | Opera | ✅ | ✅ |
+| Vivaldi | ✅ | ✅ |
 | Firefox | ❌ Not supported | ❌ | [See note below](#firefox-note) |
 
 ### Windows
