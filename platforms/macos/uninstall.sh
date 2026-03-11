@@ -6,6 +6,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
+VENV_DIR="$REPO_ROOT/.venv"
+
+# Prefer the venv Python (has all deps like keyring); fall back to system python.
+if [[ -x "$VENV_DIR/bin/python" ]]; then
+    PYTHON_CMD="$VENV_DIR/bin/python"
+elif command -v pyenv &>/dev/null; then
+    PYTHON_CMD="$(pyenv which python 2>/dev/null)" || PYTHON_CMD="$(command -v python 2>/dev/null || true)"
+else
+    PYTHON_CMD="$(command -v python 2>/dev/null || true)"
+fi
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
@@ -50,33 +60,21 @@ launchctl_unload() {
 }
 
 # ── Partner PIN check (must pass before anything is removed) ──────────────
-# We look up "python3" explicitly — not "python" — because on macOS "python"
-# historically pointed to Python 2 and may not exist on modern systems.
-# (Windows scripts probe "python", "python3", and "py" in order because the
-# executable name varies by installer; see platforms/windows/uninstall.ps1)
-if command -v pyenv &>/dev/null; then
-    _PYTHON_PATH="$(pyenv which python3 2>/dev/null)" || _PYTHON_PATH="$(command -v python3 2>/dev/null || true)"
-else
-    _PYTHON_PATH="$(command -v python3 2>/dev/null || true)"
-fi
+_PYTHON_PATH="$PYTHON_CMD"
 if [[ -n "$_PYTHON_PATH" ]]; then
     if ! "$_PYTHON_PATH" "$REPO_ROOT/pin_auth.py" verify; then
         echo -e "${RED}[uninstall] Uninstall aborted.${NC}"
         exit 1
     fi
 else
-    warn "python3 not found — skipping partner PIN check."
+    warn "python not found — skipping partner PIN check."
 fi
 
 # ── Send uninstall notification email (before stopping services / deleting .env)
 ENV_FILE="$REPO_ROOT/.env"
 
 if [[ -f "$ENV_FILE" ]]; then
-    if command -v pyenv &>/dev/null; then
-        PYTHON_PATH="$(pyenv which python3 2>/dev/null)" || PYTHON_PATH="$(command -v python3 2>/dev/null || true)"
-    else
-        PYTHON_PATH="$(command -v python3 2>/dev/null || true)"
-    fi
+    PYTHON_PATH="$PYTHON_CMD"
     info "Sending uninstall notification email..."
     # Source .env so summarizer.py can reach the API keys
     set -a
@@ -93,7 +91,7 @@ if [[ -f "$ENV_FILE" ]]; then
         warn "Could not send uninstall notification — continuing with uninstall."
     fi
 else
-    warn "Skipping uninstall notification (.env not found or python3 unavailable)."
+    warn "Skipping uninstall notification (.env not found or python unavailable)."
 fi
 
 # ── Stop and remove tracker service ───────────────────────────────────────
@@ -161,7 +159,6 @@ if [[ -n "${_PYTHON_PATH:-}" ]]; then
 fi
 
 # ── Optionally remove virtual environment ─────────────────────────────────
-VENV_DIR="$REPO_ROOT/.venv"
 if [[ -d "$VENV_DIR" ]]; then
     echo ""
     read -r -p "$(echo -e "${YELLOW}Delete Python virtual environment (.venv)?${NC} [y/N] ")" DELETE_VENV
