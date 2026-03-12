@@ -27,12 +27,6 @@ else:
 get_idle_seconds = _platform.get_idle_seconds
 get_active_label = _platform.get_active_label
 
-# Trigger TCC Automation dialogs for all installed browsers at startup so that
-# macOS attributes the grants to python3.12 (the daemon process) rather than
-# to whichever terminal happened to run an earlier install/test command.
-if hasattr(_platform, "request_automation_permissions"):
-    _platform.request_automation_permissions()
-
 
 APP_SUPPORT_DIR, LOG_DIR = get_app_dirs()
 APP_SUPPORT_DIR.mkdir(parents=True, exist_ok=True)
@@ -245,6 +239,11 @@ def check_for_shutdown_event():
 
 def main():
     global _current_session
+    # Trigger TCC Automation dialogs for all installed browsers at startup so
+    # that macOS attributes the grants to the daemon process rather than to
+    # whichever terminal happened to run an earlier install/test command.
+    if hasattr(_platform, "request_automation_permissions"):
+        _platform.request_automation_permissions()
     acquire_instance_lock(PID_FILE, _logger)
     _logger.info("Vigil started.")
     # Reconcile the integrity hash on every startup.  If the process was killed
