@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vigil-tracker"
+version = "0.1.0"
+description = "Accountability browser-monitoring tool — watches browser activity and emails a digest to you and a trusted partner."
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "openai>=1.0.0",
+    "python-dotenv",
+    "apscheduler>=3.10.0",
+    "tzlocal",
+    "psutil",
+    "keyring",
+    "uiautomation; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+vigil = "vigil_cli:main"
+
+# ── package discovery ────────────────────────────────────────────────────────
+# Root-level modules (flat layout — no src/ directory).
+[tool.setuptools]
+py-modules = [
+    "vigil_cli",
+    "config",
+    "tracker",
+    "summarizer",
+    "alerter",
+    "pin_auth",
+    "platform_common",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["platforms*"]

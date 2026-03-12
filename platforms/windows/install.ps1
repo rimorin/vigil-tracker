@@ -1004,9 +1004,22 @@ Write-Host "  Tracker logs    : $LogDir\tracker_daemon.log" -ForegroundColor Dar
 Write-Host "  Summarizer logs : $LogDir\summarizer_daemon.log" -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "  Tips:" -ForegroundColor Cyan
-Write-Host "    .\install.ps1 -Status     - check service health and settings"
-Write-Host "    .\install.ps1 -Update     - change settings and restart services"
-Write-Host "    .\install.ps1 -Blocklist  - download a fresh domain blocklist"
-Write-Host "    .\install.ps1 -Reinstall  - re-register tasks (e.g. after moving the folder)"
-Write-Host "    .\uninstall.ps1           - remove Vigil"
+Write-Host "    vigil status      - check service health and settings"
+Write-Host "    vigil update      - change settings and restart services"
+Write-Host "    vigil blocklist   - download a fresh domain blocklist"
+Write-Host "    vigil reinstall   - re-register tasks (e.g. after moving the folder)"
+Write-Host "    vigil doctor      - diagnose configuration and service issues"
+Write-Host "    vigil uninstall   - remove Vigil"
 Write-Host ""
+if (-not (Get-Command vigil -ErrorAction SilentlyContinue)) {
+    Write-Host "  Tip: run 'pip install -e .' in the project directory to enable" -ForegroundColor DarkGray
+    Write-Host "  the 'vigil' command above." -ForegroundColor DarkGray
+    Write-Host ""
+}
+
+# Auto-run doctor when vigil is available, so users see health status immediately.
+if (Get-Command vigil -ErrorAction SilentlyContinue) {
+    Write-Host "  Running 'vigil doctor' to verify your installation..." -ForegroundColor Cyan
+    Write-Host ""
+    try { vigil doctor } catch { }
+}

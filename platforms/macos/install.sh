@@ -1014,9 +1014,22 @@ echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━
 echo ""
 echo "  Tracker logs    : ~/Library/Logs/Vigil/tracker_daemon.log"
 echo "  Summarizer logs : ~/Library/Logs/Vigil/summarizer_daemon.log"
-echo "  Check status    : bash $SCRIPT_DIR/install.sh --status"
-echo "  Update settings : bash $SCRIPT_DIR/install.sh --update"
-echo "  Manage blocklist: bash $SCRIPT_DIR/install.sh --blocklist"
-echo "  Reinstall       : bash $SCRIPT_DIR/install.sh --reinstall"
-echo "  To uninstall    : bash $SCRIPT_DIR/uninstall.sh"
+echo "  Check status    : vigil status      (or: bash $SCRIPT_DIR/install.sh --status)"
+echo "  Update settings : vigil update      (or: bash $SCRIPT_DIR/install.sh --update)"
+echo "  Manage blocklist: vigil blocklist   (or: bash $SCRIPT_DIR/install.sh --blocklist)"
+echo "  Reinstall       : vigil reinstall   (or: bash $SCRIPT_DIR/install.sh --reinstall)"
+echo "  Diagnose issues : vigil doctor"
+echo "  To uninstall    : vigil uninstall   (or: bash $SCRIPT_DIR/uninstall.sh)"
 echo ""
+if ! command -v vigil &>/dev/null; then
+  echo "  Tip: run 'pip install -e .' in the project directory to enable the"
+  echo "  'vigil' command above."
+  echo ""
+fi
+
+# Auto-run doctor when vigil is available, so users see their health status immediately.
+if command -v vigil &>/dev/null; then
+  echo "  Running 'vigil doctor' to verify your installation…"
+  echo ""
+  vigil doctor || true
+fi

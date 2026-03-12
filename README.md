@@ -454,57 +454,42 @@ SUMMARY_SCHEDULE_HOUR=9
 
 ## 🚀 Installation
 
-### macOS
+### Quick start
 
 ```bash
-bash platforms/macos/install.sh
+git clone https://github.com/your-username/vigil-tracker.git
+cd vigil-tracker
+pip install -e .   # adds the `vigil` command to your PATH
+vigil setup        # interactive guided wizard
 ```
 
-The installer will:
-1. Verify macOS version, Python, and required files
-2. Walk you through `.env` configuration interactively — auto-detects your SMTP server from your email address, and verifies your credentials immediately after you paste your app password (retry in-place if wrong)
-3. Validate your OpenAI key (if provided)
-4. Install Python packages
-5. Invite your partner to set a PIN (stored securely in macOS Keychain — only they should know it)
-6. Start both background services (auto-restart on crash, auto-start on login)
-7. Send a confirmation email — if delivery fails, the installer shows your configured SMTP settings and the exact command to fix them
+> **Tip:** Use [`pipx`](https://pipx.pypa.io) instead of `pip` for an isolated install: `pipx install -e .`
 
-> **Permissions:** On first run, macOS will show dialogs asking Vigil to control your browsers. Click **OK** on each one — this is required for URL tracking.
+Once installed, everything is managed through the `vigil` command:
 
-```bash
-bash platforms/macos/install.sh --status   # check if services are running
-bash platforms/macos/install.sh            # re-run any time to update settings or restart services
-```
+| Command | What it does |
+|---|---|
+| `vigil setup` | Interactive first-time setup wizard |
+| `vigil status` | Service health and config summary |
+| `vigil update` | Edit settings and reload services |
+| `vigil blocklist` | Download the latest domain blocklist |
+| `vigil reinstall` | Re-register services (e.g. after moving the folder) |
+| `vigil doctor` | Diagnose configuration and service issues |
+| `vigil uninstall` | Remove Vigil from this machine |
 
-### Windows
+---
 
-Navigate into `platforms\windows\`, then double-click **`install.bat`**, or open a Command Prompt / PowerShell in the project root and run:
+### What the wizard does
 
-```bat
-platforms\windows\install.bat
-```
+1. Verifies your OS version, Python 3.8+, and required files
+2. Walks you through `.env` configuration interactively — auto-detects your SMTP server from your email address, and verifies credentials immediately after you paste your app password (retry in-place if wrong)
+3. Validates your OpenAI key (if provided)
+4. Installs Python packages
+5. Invites your partner to set a PIN (stored securely in the OS keychain — only they should know it)
+6. Registers both background services (auto-restart on crash, auto-start on login)
+7. Sends a confirmation email — if delivery fails, shows your SMTP settings and the exact command to fix them
 
-The `.bat` wrapper bypasses the PowerShell execution policy for this script only — no system changes needed.
-
-If you prefer to run the PowerShell script directly, see the [execution policy note](#3-powershell-execution-policy) above, then:
-
-```powershell
-.\platforms\windows\install.ps1
-```
-
-The installer will:
-1. Verify Windows 10+ and Python 3.8+
-2. Walk you through `.env` configuration interactively — auto-detects your SMTP server from your email address, and verifies your credentials immediately after you paste your app password (retry in-place if wrong)
-3. Install Python packages via pip
-4. Validate your OpenAI key (if provided)
-5. Invite your partner to set a PIN (stored securely in Windows Credential Locker — only they should know it)
-6. Register both services in Task Scheduler (auto-restart on crash, auto-start at logon)
-7. Send a confirmation email — if delivery fails, the installer shows your configured SMTP settings and the exact command to fix them
-
-```bat
-platforms\windows\install.bat -Status      # check if services are running
-platforms\windows\install.bat -Reinstall   # re-register tasks after moving the folder or upgrading Python
-```
+> **macOS permissions:** On first run, macOS will show dialogs asking Vigil to control your browsers. Click **OK** on each one — this is required for URL tracking.
 
 ---
 
@@ -522,27 +507,11 @@ platforms\windows\install.bat -Reinstall   # re-register tasks after moving the 
 
 > **Partner PIN required** — if a partner PIN was set during installation, you will need to enter it before the uninstaller proceeds. Three failed attempts will trigger an alert email to your accountability partner.
 
-### macOS
-
 ```bash
-bash platforms/macos/uninstall.sh
+vigil uninstall
 ```
 
-The uninstaller will stop all services, optionally delete log files and settings, clear the partner PIN from Keychain, and offer to reset macOS Automation permissions granted to Vigil.
-
-### Windows
-
-```bat
-platforms\windows\uninstall.bat
-```
-
-Or directly:
-
-```powershell
-.\platforms\windows\uninstall.ps1
-```
-
-You'll be asked whether to also delete your log files and settings.
+The uninstaller will stop all services, optionally delete log files and settings, clear the partner PIN from the OS keychain, and (on macOS) offer to reset Automation permissions granted to Vigil.
 
 ---
 
