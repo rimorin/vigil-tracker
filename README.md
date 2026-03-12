@@ -12,18 +12,19 @@ Vigil runs quietly in the background on your computer. It watches which websites
 
 - [Why This Exists](#-why-this-exists)
 - [How it Works](#️-how-it-works)
+- [Why This Method Works](#-why-this-method-works)
 - [Features](#-features)
 - [Supported Browsers](#-supported-browsers)
-- [Project Structure](#-project-structure)
+- [Before You Install](#-before-you-install)
+- [Installation](#-installation)
+- [Settings Reference](#️-settings-reference)
 - [Partner PIN Protection](#-partner-pin-protection)
 - [Updating the Domain Blocklist](#-updating-the-domain-blocklist)
 - [How Alert Detection Works](#-how-alert-detection-works)
-- [Before You Install](#-before-you-install)
-- [Installation](#-installation)
-- [Uninstall](#-uninstall)
 - [Log Files](#-log-files)
-- [Settings Reference](#️-settings-reference)
+- [Uninstall](#-uninstall)
 - [Privacy](#-privacy)
+- [Project Structure](#-project-structure)
 - [Tests](#-tests)
 - [Tech Stack](#-tech-stack)
 - [References](#-references)
@@ -64,6 +65,16 @@ Vigil runs as a background service that periodically reads your browser history 
 
 ---
 
+## 🧠 Why This Method Works
+
+Pornography survives because it hides. Bringing it into the open — to someone you respect — is what breaks the cycle. Research backs this up: people who check in with an accountability partner are significantly more likely to follow through on their goals than those who go it alone.
+
+The Bible makes the same point. *"Two are better than one… if one of them falls, the other can help his partner up. But what will happen to the one who falls with no one to help him up?"* (Ecclesiastes 4:9–10). *"Therefore, openly confess your sins to one another and pray for one another, so that you may be healed"* (James 5:16). Accountability isn't a modern self-help concept — it's a principle woven through scripture.
+
+Vigil applies this practically: your partner sees exactly what you see, on the same schedule, with no selective disclosure. The power isn't in the report — it's in knowing they'll see it.
+
+---
+
 ## ✨ Features
 
 - 🌐 **All major browsers** — full URLs in Safari, Chrome, Edge, Brave, Arc, and Opera on macOS; Chrome, Edge, Brave, and more on Windows. See [Supported Browsers](#-supported-browsers).
@@ -74,7 +85,7 @@ Vigil runs as a background service that periodically reads your browser history 
 - 🚀 **Always running** — starts on login, restarts on crash via macOS launchd or Windows Task Scheduler.
 - 🛡️ **Tamper detection** — if the log file is edited, an alert is sent before the next digest.
 - 👁️ **Watchdog** — if the tracker stops unexpectedly, an alert goes out immediately.
-- 🔑 **Partner PIN protection** — your accountability partner sets a PIN at install time — and keeps it to themselves. Without it, Vigil cannot be uninstalled. The PIN is hashed and stored securely in the OS keychain — not in any file you can edit. Three failed attempts triggers an immediate alert to your partner. See [Partner PIN Protection](#-partner-pin-protection).
+- 🔑 **Partner PIN protection** — your partner sets a PIN at install time that only they know. Without it, Vigil cannot be uninstalled. See [Partner PIN Protection](#-partner-pin-protection).
 - 🔐 **Private** — only domain names (e.g. `youtube.com`) are ever sent to OpenAI. Full URLs stay on your machine.
 
 ---
@@ -110,46 +121,202 @@ Vigil runs as a background service that periodically reads your browser history 
 >
 > *Chrome on Windows uses a locale-sensitive label to find the address bar. On non-English Windows, Edge is the recommended choice for full URL capture.
 
-> **Firefox note:** Firefox is not supported at this time. Due to architectural limitations (history not written to disk in private mode, database file locking while running, and no accessible address bar API), reliable URL tracking in Firefox — especially in private windows — requires either a browser extension or network-level interception, neither of which fits Vigil's zero-friction install model. Firefox represents ~2–3% of global browser usage; support may be revisited in a future release.
+> **Firefox note:** Firefox is not supported. Private browsing history is never written to disk, the database is locked while running, and there is no accessible address bar API — making reliable tracking impossible without a browser extension. Support may be revisited in a future release.
 
 ---
 
-## 📁 Project Structure
+## ✅ Before You Install
 
+### macOS requirements
+
+#### 1. macOS 10.15 Catalina or newer
+
+| Version | Supported |
+|---|---|
+| 15 Sequoia – 10.15 Catalina | ✅ |
+| 10.14 Mojave or older | ❌ |
+
+#### 2. Python 3.8 or newer
+
+```bash
+python --version
 ```
-vigil-tracker/
-├── tracker.py                  # Watches browser tabs every few seconds
-├── summarizer.py               # Sends scheduled digest emails
-├── alerter.py                  # Sends instant alerts for porn sites
-├── pin_auth.py                 # Partner PIN hashing and OS keychain storage
-├── config.py                   # Reads settings from .env
-├── platform_common.py          # Shared OS path helpers
-├── requirements.txt            # Python dependencies
-├── platforms/
-│   ├── windows/
-│   │   ├── tracker_windows.py  # Windows idle + UIA URL detection
-│   │   ├── install.bat         # Launcher (bypasses execution policy)
-│   │   ├── install.ps1         # Windows one-command setup (PowerShell)
-│   │   ├── uninstall.bat       # Uninstaller launcher
-│   │   ├── uninstall.ps1       # Windows one-command removal (PowerShell)
-│   │   ├── vigil-tracker.xml   # Task Scheduler template (tracker)
-│   │   └── vigil-summarizer.xml # Task Scheduler template (summarizer)
-│   └── macos/
-│       ├── tracker_macos.py    # macOS idle + AppleScript URL detection
-│       ├── install.sh          # macOS one-command setup
-│       ├── uninstall.sh        # macOS one-command removal
-│       ├── com.vigil.tracker.plist    # launchd config (tracker)
-│       └── com.vigil.summarizer.plist # launchd config (summarizer)
-├── .env.template               # Settings template — copy to .env and fill in
-├── data/
-│   └── domains.txt             # Offline blocklist for instant alerts
-└── tests/
-    ├── conftest.py
-    ├── test_tracker.py
-    ├── test_summarizer.py
-    ├── test_alerter.py
-    ├── test_pin_auth.py
-    └── test_windows.py
+
+No Python? Install via [Homebrew](https://brew.sh):
+
+```bash
+brew install python
+```
+
+#### 3. Browser access permissions
+
+Vigil uses macOS Automation (AppleScript) to read browser tabs, including private windows. **No manual setup needed** — when the tracker starts for the first time, macOS will automatically prompt you to allow access for each browser you have installed. Just click **OK** on each dialog.
+
+> If the dialogs don't appear, go to **System Settings → Privacy & Security → Automation** and verify that **python3** (or your Python version) has permission to control your browsers.
+
+---
+
+### Windows requirements
+
+#### 1. Windows 10 (build 17763) or newer
+
+```powershell
+[System.Environment]::OSVersion
+```
+
+#### 2. Python 3.8 or newer
+
+Download from [python.org](https://python.org) and tick **"Add Python to PATH"** during setup.
+
+```powershell
+python --version
+```
+
+#### 3. PowerShell execution policy
+
+Windows blocks `.ps1` scripts by default. The simplest fix is to use the
+provided batch wrapper — it bypasses the policy **only for this script**
+without changing any system setting:
+
+```bat
+install.bat
+```
+
+If you prefer to run the PowerShell script directly, allow user-level scripts once first:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+.\install.ps1
+```
+
+#### 4. Browser address bar access
+
+No special flags or configuration needed. Vigil reads browser URLs via the Windows Accessibility API (UI Automation):
+
+- **Chrome 138+** — native UIA enabled by default (released mid-2025)
+- **Edge** — always supported, most reliable
+
+---
+
+### OpenAI API key *(optional)*
+
+Skip this if you don't have one — Vigil will still send a plain visit list digest generated entirely on your machine.
+
+For the full AI summary (categories, timeline highlights, flagged content analysis):
+1. Sign up at [platform.openai.com](https://platform.openai.com)
+2. Create an API key under **API Keys**
+3. Enable billing (~$0.001 per digest)
+
+### Email account (SMTP)
+
+Vigil sends email through your own existing email account using SMTP — no third-party service needed. You provide your email address and an app password; the installer auto-detects the server settings for you.
+
+| Provider | `SMTP_HOST` | `SMTP_PORT` |
+|---|---|---|
+| Gmail | `smtp.gmail.com` | `587` |
+| Outlook / Microsoft 365 | `smtp.office365.com` | `587` |
+| Yahoo Mail | `smtp.mail.yahoo.com` | `587` |
+| Fastmail | `smtp.fastmail.com` | `587` |
+| Apple iCloud | `smtp.mail.me.com` | `587` |
+
+**App passwords (required for most providers):**
+
+- **Gmail** — [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords). Requires 2-Step Verification.
+- **iCloud** — [appleid.apple.com](https://appleid.apple.com) → Sign-In and Security → App-Specific Passwords.
+- **Yahoo** — [help.yahoo.com](https://help.yahoo.com/kb/generate-third-party-passwords-sln15241.html). Requires 2-Step Verification.
+- **Fastmail** — [fastmail.com/settings/security](https://www.fastmail.com/settings/security/).
+- **Outlook** — normal password usually works; generate an app password if your org enforces MFA.
+
+> **Tip:** Put both your address and your partner's in `SMTP_TO` (comma-separated). Both receive every digest and every alert. You can use a spare account as the sender.
+
+> **If emails stop arriving after install**, run `bash platforms/macos/install.sh --update` (macOS) or `platforms\windows\install.bat -Update` (Windows) to re-enter your SMTP credentials.
+
+---
+
+## 🚀 Installation
+
+### Quick start
+
+```bash
+git clone https://github.com/your-username/vigil-tracker.git
+cd vigil-tracker
+pip install -e .   # adds the `vigil` command to your PATH
+vigil setup        # interactive guided wizard
+```
+
+> **Tip:** Use [`pipx`](https://pipx.pypa.io) instead of `pip` for an isolated install: `pipx install -e .`
+
+Once installed, everything is managed through the `vigil` command:
+
+| Command | What it does |
+|---|---|
+| `vigil setup` | Interactive first-time setup wizard |
+| `vigil status` | Service health and config summary |
+| `vigil update` | Edit settings and reload services |
+| `vigil blocklist` | Download the latest domain blocklist |
+| `vigil reinstall` | Re-register services (e.g. after moving the folder) |
+| `vigil doctor` | Diagnose configuration and service issues |
+| `vigil uninstall` | Remove Vigil from this machine |
+
+---
+
+### What the wizard does
+
+1. Verifies your OS version, Python 3.8+, and required files
+2. Walks you through `.env` configuration interactively — auto-detects your SMTP server from your email address, and verifies credentials immediately after you paste your app password (retry in-place if wrong)
+3. Validates your OpenAI key (if provided)
+4. Installs Python packages
+5. Invites your partner to set a PIN (stored securely in the OS keychain — only they should know it)
+6. Registers both background services (auto-restart on crash, auto-start on login)
+7. Sends a confirmation email — if delivery fails, shows your SMTP settings and the exact command to fix them
+
+---
+
+## ⚙️ Settings Reference
+
+The installer will prompt for everything interactively. To configure manually:
+
+```bash
+cp .env.template .env
+```
+
+| Setting | Default | Description |
+|---|---|---|
+| `OPENAI_API_KEY` | *(empty)* | Optional. Leave blank for plain visit list digest. |
+| `OPENAI_MODEL` | `gpt-4o-mini` | Only used when API key is set. |
+| `SMTP_HOST` | — | Your provider's SMTP address |
+| `SMTP_PORT` | `587` | Use `465` for SSL-only providers |
+| `SMTP_USER` | — | Sender email address |
+| `SMTP_PASS` | — | Password or app password |
+| `SMTP_FROM` | `SMTP_USER` | Display sender address |
+| `SMTP_TO` | — | Recipient(s), comma-separated |
+| `SUMMARY_SCHEDULE` | `daily` | `hourly` / `daily` / `weekly` / `monthly` / `interval` |
+| `SUMMARY_SCHEDULE_HOUR` | `21` | Hour to send (0–23) |
+| `SUMMARY_SCHEDULE_MINUTE` | `0` | Minute to send (0–59) |
+| `SUMMARY_SCHEDULE_WEEKDAY` | `mon` | `mon`–`sun` (weekly only) |
+| `SUMMARY_SCHEDULE_DAY` | `1` | Day 1–28 (monthly only) |
+| `SUMMARY_SCHEDULE_INTERVAL_MINUTES` | `60` | Minutes between digests (interval only) |
+| `LOG_RETENTION_DAYS` | `30` | Activity log entries older than this many days are pruned |
+| `ALERT_ENABLED` | `true` | Enable/disable alerts |
+| `ALERT_EMAIL` | `true` | Send alert via email |
+| `ALERT_SCAN_INTERVAL_MINUTES` | `5` | How often (in minutes) to scan the log for flagged visits |
+
+**Schedule examples:**
+
+```bash
+# Every day at 9 PM
+SUMMARY_SCHEDULE=daily
+SUMMARY_SCHEDULE_HOUR=21
+
+# Every Monday at 8 AM
+SUMMARY_SCHEDULE=weekly
+SUMMARY_SCHEDULE_WEEKDAY=mon
+SUMMARY_SCHEDULE_HOUR=8
+
+# 1st of each month at 9 AM
+SUMMARY_SCHEDULE=monthly
+SUMMARY_SCHEDULE_DAY=1
+SUMMARY_SCHEDULE_HOUR=9
 ```
 
 ---
@@ -266,24 +433,6 @@ The following adult/pornographic sites were visited:
 | SMTP failure impact | Stalls main loop | Isolated to background thread |
 | Email on slow SMTP | Could block tracking | Never blocks tracking |
 
-### Sequence diagram
-
-```
-Tracker loop (every ~5s)                   Alert daemon (every 5 min)
-─────────────────────────                  ──────────────────────────
-Poll active tab
-  └─ adult domain? → is_adult = true
-
-Session ends
-  └─ write log line
-       └─ is_adult? → append [FLAGGED_CONTENT]
-                                           Wake up
-                                             └─ read cursor
-                                             └─ scan new log lines
-                                             └─ collect [FLAGGED_CONTENT] lines
-                                             └─ advance cursor
-                                             └─ any found? → send email
-```
 
 ### Configuring the scan interval
 
@@ -294,226 +443,6 @@ ALERT_SCAN_INTERVAL_MINUTES=5   # default — alert within 5 minutes of a visit
 ALERT_SCAN_INTERVAL_MINUTES=1   # near-real-time
 ALERT_SCAN_INTERVAL_MINUTES=10  # less frequent; fine for most use cases
 ```
-
----
-
-## ✅ Before You Install
-
-### macOS requirements
-
-#### 1. macOS 10.15 Catalina or newer
-
-| Version | Supported |
-|---|---|
-| 15 Sequoia – 10.15 Catalina | ✅ |
-| 10.14 Mojave or older | ❌ |
-
-#### 2. Python 3.8 or newer
-
-```bash
-python --version
-```
-
-No Python? Install via [Homebrew](https://brew.sh):
-
-```bash
-brew install python
-```
-
-#### 3. Browser access permissions
-
-Vigil uses macOS Automation (AppleScript) to read browser tabs, including private windows. **No manual setup needed** — when the tracker starts for the first time, macOS will automatically prompt you to allow access for each browser you have installed. Just click **OK** on each dialog.
-
-> If the dialogs don't appear, go to **System Settings → Privacy & Security → Automation** and verify that **python3** (or your Python version) has permission to control your browsers.
-
----
-
-### Windows requirements
-
-#### 1. Windows 10 (build 17763) or newer
-
-```powershell
-[System.Environment]::OSVersion
-```
-
-#### 2. Python 3.8 or newer
-
-Download from [python.org](https://python.org) and tick **"Add Python to PATH"** during setup.
-
-```powershell
-python --version
-```
-
-#### 3. PowerShell execution policy
-
-Windows blocks `.ps1` scripts by default. The simplest fix is to use the
-provided batch wrapper — it bypasses the policy **only for this script**
-without changing any system setting:
-
-```bat
-install.bat
-```
-
-If you prefer to run the PowerShell script directly, allow user-level scripts once first:
-
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-.\install.ps1
-```
-
-#### 4. Browser address bar access
-
-No special flags or configuration needed. Vigil reads browser URLs via the Windows Accessibility API (UI Automation):
-
-- **Chrome 138+** — native UIA enabled by default (released mid-2025)
-- **Edge** — always supported, most reliable
-
----
-
-### OpenAI API key *(optional)*
-
-Skip this if you don't have one — Vigil will still send a plain visit list digest generated entirely on your machine.
-
-For the full AI summary (categories, timeline highlights, flagged content analysis):
-1. Sign up at [platform.openai.com](https://platform.openai.com)
-2. Create an API key under **API Keys**
-3. Enable billing (~$0.001 per digest)
-
-### Email account (SMTP)
-
-Vigil sends email through your own existing email account using SMTP — no third-party service needed. You provide your email address and an app password; the installer auto-detects the server settings for you.
-
-| Provider | `SMTP_HOST` | `SMTP_PORT` |
-|---|---|---|
-| Gmail | `smtp.gmail.com` | `587` |
-| Outlook / Microsoft 365 | `smtp.office365.com` | `587` |
-| Yahoo Mail | `smtp.mail.yahoo.com` | `587` |
-| Fastmail | `smtp.fastmail.com` | `587` |
-| Apple iCloud | `smtp.mail.me.com` | `587` |
-
-**App passwords (required for most providers):**
-
-- **Gmail** — [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords). Requires 2-Step Verification.
-- **iCloud** — [appleid.apple.com](https://appleid.apple.com) → Sign-In and Security → App-Specific Passwords.
-- **Yahoo** — [help.yahoo.com](https://help.yahoo.com/kb/generate-third-party-passwords-sln15241.html). Requires 2-Step Verification.
-- **Fastmail** — [fastmail.com/settings/security](https://www.fastmail.com/settings/security/).
-- **Outlook** — normal password usually works; generate an app password if your org enforces MFA.
-
-> **Tip:** Put both your address and your partner's in `SMTP_TO` (comma-separated). Both receive every digest and every alert. You can use a spare account as the sender.
-
-> **If emails stop arriving after install**, run `bash platforms/macos/install.sh --update` (macOS) or `platforms\windows\install.bat -Update` (Windows) to re-enter your SMTP credentials.
-
----
-
-## ⚙️ Settings Reference
-
-The installer will prompt for everything interactively. To configure manually:
-
-```bash
-cp .env.template .env
-```
-
-| Setting | Default | Description |
-|---|---|---|
-| `OPENAI_API_KEY` | *(empty)* | Optional. Leave blank for plain visit list digest. |
-| `OPENAI_MODEL` | `gpt-4o-mini` | Only used when API key is set. |
-| `SMTP_HOST` | — | Your provider's SMTP address |
-| `SMTP_PORT` | `587` | Use `465` for SSL-only providers |
-| `SMTP_USER` | — | Sender email address |
-| `SMTP_PASS` | — | Password or app password |
-| `SMTP_FROM` | `SMTP_USER` | Display sender address |
-| `SMTP_TO` | — | Recipient(s), comma-separated |
-| `SUMMARY_SCHEDULE` | `daily` | `hourly` / `daily` / `weekly` / `monthly` / `interval` |
-| `SUMMARY_SCHEDULE_HOUR` | `21` | Hour to send (0–23) |
-| `SUMMARY_SCHEDULE_MINUTE` | `0` | Minute to send (0–59) |
-| `SUMMARY_SCHEDULE_WEEKDAY` | `mon` | `mon`–`sun` (weekly only) |
-| `SUMMARY_SCHEDULE_DAY` | `1` | Day 1–28 (monthly only) |
-| `SUMMARY_SCHEDULE_INTERVAL_MINUTES` | `60` | Minutes between digests (interval only) |
-| `LOG_RETENTION_DAYS` | `30` | Activity log entries older than this many days are pruned |
-| `ALERT_ENABLED` | `true` | Enable/disable alerts |
-| `ALERT_EMAIL` | `true` | Send alert via email |
-| `ALERT_SCAN_INTERVAL_MINUTES` | `5` | How often (in minutes) to scan the log for flagged visits |
-
-**Schedule examples:**
-
-```bash
-# Every day at 9 PM
-SUMMARY_SCHEDULE=daily
-SUMMARY_SCHEDULE_HOUR=21
-
-# Every Monday at 8 AM
-SUMMARY_SCHEDULE=weekly
-SUMMARY_SCHEDULE_WEEKDAY=mon
-SUMMARY_SCHEDULE_HOUR=8
-
-# 1st of each month at 9 AM
-SUMMARY_SCHEDULE=monthly
-SUMMARY_SCHEDULE_DAY=1
-SUMMARY_SCHEDULE_HOUR=9
-```
-
----
-
-## 🚀 Installation
-
-### Quick start
-
-```bash
-git clone https://github.com/your-username/vigil-tracker.git
-cd vigil-tracker
-pip install -e .   # adds the `vigil` command to your PATH
-vigil setup        # interactive guided wizard
-```
-
-> **Tip:** Use [`pipx`](https://pipx.pypa.io) instead of `pip` for an isolated install: `pipx install -e .`
-
-Once installed, everything is managed through the `vigil` command:
-
-| Command | What it does |
-|---|---|
-| `vigil setup` | Interactive first-time setup wizard |
-| `vigil status` | Service health and config summary |
-| `vigil update` | Edit settings and reload services |
-| `vigil blocklist` | Download the latest domain blocklist |
-| `vigil reinstall` | Re-register services (e.g. after moving the folder) |
-| `vigil doctor` | Diagnose configuration and service issues |
-| `vigil uninstall` | Remove Vigil from this machine |
-
----
-
-### What the wizard does
-
-1. Verifies your OS version, Python 3.8+, and required files
-2. Walks you through `.env` configuration interactively — auto-detects your SMTP server from your email address, and verifies credentials immediately after you paste your app password (retry in-place if wrong)
-3. Validates your OpenAI key (if provided)
-4. Installs Python packages
-5. Invites your partner to set a PIN (stored securely in the OS keychain — only they should know it)
-6. Registers both background services (auto-restart on crash, auto-start on login)
-7. Sends a confirmation email — if delivery fails, shows your SMTP settings and the exact command to fix them
-
-> **macOS permissions:** On first run, macOS will show dialogs asking Vigil to control your browsers. Click **OK** on each one — this is required for URL tracking.
-
----
-
-### After installation
-
-**Vigil runs silently in the background:**
-- **Every ~5 seconds** — logs the active browser tab and time spent; flags adult-site visits with `[FLAGGED_CONTENT]` in the log
-- **Every N minutes** — scans the log for new `[FLAGGED_CONTENT]` entries; sends one consolidated alert email per cycle if any are found (interval set by `ALERT_SCAN_INTERVAL_MINUTES`)
-- **On schedule** — sends your digest (AI summary or plain visit list)
-- **Every 5 minutes** — checks the tracker is running; alerts if it stops
-
----
-
-## 🛑 Uninstall
-
-> **Partner PIN required** — if a partner PIN was set during installation, you will need to enter it before the uninstaller proceeds. Three failed attempts will trigger an alert email to your accountability partner.
-
-```bash
-vigil uninstall
-```
-
-The uninstaller will stop all services, optionally delete log files and settings, clear the partner PIN from the OS keychain, and (on macOS) offer to reset Automation permissions granted to Vigil.
 
 ---
 
@@ -536,6 +465,18 @@ The uninstaller will stop all services, optionally delete log files and settings
 
 ---
 
+## 🛑 Uninstall
+
+> **Partner PIN required** — if a partner PIN was set during installation, you will need to enter it before the uninstaller proceeds. Three failed attempts will trigger an alert email to your accountability partner.
+
+```bash
+vigil uninstall
+```
+
+The uninstaller will stop all services, optionally delete log files and settings, clear the partner PIN from the OS keychain, and (on macOS) offer to reset Automation permissions granted to Vigil.
+
+---
+
 ## 🔐 Privacy
 
 | Data | Where it goes |
@@ -545,6 +486,46 @@ The uninstaller will stop all services, optionally delete log files and settings
 | Digest content | Sent by email to your chosen recipients |
 
 > Keep `.env` private — it contains your credentials. It's already in `.gitignore`.
+
+---
+
+## 📁 Project Structure
+
+```
+vigil-tracker/
+├── tracker.py                  # Watches browser tabs every few seconds
+├── summarizer.py               # Sends scheduled digest emails
+├── alerter.py                  # Sends instant alerts for porn sites
+├── pin_auth.py                 # Partner PIN hashing and OS keychain storage
+├── config.py                   # Reads settings from .env
+├── platform_common.py          # Shared OS path helpers
+├── requirements.txt            # Python dependencies
+├── platforms/
+│   ├── windows/
+│   │   ├── tracker_windows.py  # Windows idle + UIA URL detection
+│   │   ├── install.bat         # Launcher (bypasses execution policy)
+│   │   ├── install.ps1         # Windows one-command setup (PowerShell)
+│   │   ├── uninstall.bat       # Uninstaller launcher
+│   │   ├── uninstall.ps1       # Windows one-command removal (PowerShell)
+│   │   ├── vigil-tracker.xml   # Task Scheduler template (tracker)
+│   │   └── vigil-summarizer.xml # Task Scheduler template (summarizer)
+│   └── macos/
+│       ├── tracker_macos.py    # macOS idle + AppleScript URL detection
+│       ├── install.sh          # macOS one-command setup
+│       ├── uninstall.sh        # macOS one-command removal
+│       ├── com.vigil.tracker.plist    # launchd config (tracker)
+│       └── com.vigil.summarizer.plist # launchd config (summarizer)
+├── .env.template               # Settings template — copy to .env and fill in
+├── data/
+│   └── domains.txt             # Offline blocklist for instant alerts
+└── tests/
+    ├── conftest.py
+    ├── test_tracker.py
+    ├── test_summarizer.py
+    ├── test_alerter.py
+    ├── test_pin_auth.py
+    └── test_windows.py
+```
 
 ---
 
