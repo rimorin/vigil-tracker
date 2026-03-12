@@ -585,6 +585,7 @@ if (-not $Reinstall) {
 
     # Initialise SMTP auto-detection state.
     $script:SmtpHostAutoFilled    = $false
+    $script:SmtpPassVerified      = $false
     $script:SmtpUserEntered       = ""
     $script:SmtpDetectedHost      = ""; $script:SmtpDetectedPort = 587
     $script:SmtpDetectedAppPassUrl = ""; $script:SmtpDetectedAppPassLabel = ""
@@ -639,12 +640,54 @@ if (-not $Reinstall) {
                         Write-Host "  iCloud  -> https://appleid.apple.com/account/manage"
                         Write-Host "  Outlook -> https://aka.ms/AppPasswords"
                     }
-                    do {
+                    Write-Host "  After generating your app password, come back here and paste it below."
+                    $testHost = Read-EnvValue "SMTP_HOST"; if (-not $testHost) { $testHost = "smtp.gmail.com" }
+                    $testPort = Read-EnvValue "SMTP_PORT"; if (-not $testPort) { $testPort = "587" }
+                    $testUser = Read-EnvValue "SMTP_USER"; if (-not $testUser) { $testUser = $script:SmtpUserEntered }
+                    while ($true) {
                         $secure = Read-Host "  Password" -AsSecureString
                         $bstr   = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
                         $entered = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
                         [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-                    } while (-not $entered)
+                        if (-not $entered) {
+                            Write-Host "  Value cannot be empty." -ForegroundColor Red
+                            continue
+                        }
+                        # Base64-encode password so it passes through PowerShell arg quoting safely.
+                        $encodedPw = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($entered))
+                        Start-Spinner "Verifying SMTP credentials..."
+                        $smtpInline = & $pythonExe -c @"
+import smtplib, ssl, sys, base64
+host, port, user = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+pw = base64.b64decode(sys.argv[4]).decode('utf-8')
+try:
+    ctx = ssl.create_default_context()
+    if port == 465:
+        s = smtplib.SMTP_SSL(host, port, context=ctx, timeout=10)
+    else:
+        s = smtplib.SMTP(host, port, timeout=10)
+        s.ehlo(); s.starttls(context=ctx); s.ehlo()
+    s.login(user, pw)
+    s.quit()
+    print('ok')
+except smtplib.SMTPAuthenticationError:
+    print('auth_failed'); sys.exit(1)
+except Exception as e:
+    print('error: ' + str(e)); sys.exit(2)
+"@ $testHost $testPort $testUser $encodedPw 2>&1
+                        Stop-Spinner
+                        if ($smtpInline -match "^ok") {
+                            Write-OK "SMTP credentials verified"
+                            $script:SmtpPassVerified = $true
+                            break
+                        } elseif ($smtpInline -match "auth_failed") {
+                            Write-Host "  Authentication failed. Double-check your app password and try again." -ForegroundColor Red
+                            Write-Host "  Ensure 2FA is enabled and you copied the app password (not your sign-in password)."
+                        } else {
+                            Write-Warn "Could not connect to SMTP ($smtpInline) - saving anyway. Check your internet connection."
+                            break
+                        }
+                    }
                 }
                 "SMTP_TO" {
                     Write-Host "  Recipient email address(es)" -ForegroundColor Cyan
@@ -800,10 +843,11 @@ if (-not $Reinstall) {
         Write-Warn "No OpenAI API key set - digests will be sent as a plain visit list (no AI summary)."
     }
 
-    # -- Validate SMTP ---------------------------------------------------------
-    Write-Step "Validating SMTP connection"
-    Start-Spinner "Testing SMTP connection..."
-    $smtpResult = & $pythonExe -c @"
+    # -- Validate SMTP (skipped if already verified inline during wizard) -------
+    if (-not $script:SmtpPassVerified) {
+        Write-Step "Validating SMTP connection"
+        Start-Spinner "Testing SMTP connection..."
+        $smtpResult = & $pythonExe -c @"
 import smtplib, ssl, sys
 try:
     sys.path.insert(0, r'$RepoRoot')
@@ -825,18 +869,19 @@ except Exception as e:
     print('FAIL: ' + str(e))
 "@ 2>&1
 
-    Stop-Spinner
-    if ($smtpResult -match "^OK") {
-        Write-OK "SMTP connection verified"
-    } elseif ($smtpResult -match "AUTH_FAILED") {
-        Write-Warn "SMTP authentication failed - check SMTP_USER and SMTP_PASS in .env."
-        $cont = Read-Host "`n  Continue anyway? [y/N]"
-        if ($cont -notmatch '^[Yy]') { exit 1 }
-    } else {
-        Write-Warn "Could not verify SMTP: $smtpResult - check your internet connection."
-        $cont = Read-Host "`n  Continue anyway? [y/N]"
-        if ($cont -notmatch '^[Yy]') { exit 1 }
-    }
+        Stop-Spinner
+        if ($smtpResult -match "^OK") {
+            Write-OK "SMTP connection verified"
+        } elseif ($smtpResult -match "AUTH_FAILED") {
+            Write-Warn "SMTP authentication failed - check SMTP_USER and SMTP_PASS in .env."
+            $cont = Read-Host "`n  Continue anyway? [y/N]"
+            if ($cont -notmatch '^[Yy]') { exit 1 }
+        } else {
+            Write-Warn "Could not verify SMTP: $smtpResult - check your internet connection."
+            $cont = Read-Host "`n  Continue anyway? [y/N]"
+            if ($cont -notmatch '^[Yy]') { exit 1 }
+        }
+    } # end SmtpPassVerified check
 
     # -- Partner PIN (optional) ------------------------------------------------
     & $pythonExe "$RepoRoot\pin_auth.py" "status" 2>$null
@@ -926,8 +971,22 @@ Stop-Spinner
 if ($confirmExit -eq 0) {
     Write-OK "Confirmation email sent"
 } else {
-    Write-Warn "Confirmation email failed - check your SMTP credentials."
-    Write-Warn "Services are still running; this does not affect normal operation."
+    Write-Host ""
+    Write-Host "  ----------------------------------------------------------------" -ForegroundColor Red
+    Write-Host "    Could not send confirmation email" -ForegroundColor Red
+    Write-Host "  ----------------------------------------------------------------" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "  Vigil is running but email delivery is not working."
+    Write-Host "  You will not receive digests or alerts until this is fixed." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  Configured SMTP:"
+    Write-Host "    Host : $(Read-EnvValue 'SMTP_HOST'):$(Read-EnvValue 'SMTP_PORT')"
+    Write-Host "    User : $(Read-EnvValue 'SMTP_USER')"
+    Write-Host "    To   : $(Read-EnvValue 'SMTP_TO')"
+    Write-Host ""
+    Write-Host "  To fix:  .\install.ps1 -Update"
+    Write-Host "  (re-enter your SMTP credentials)"
+    Write-Host ""
 }
 
 # -- Summary ------------------------------------------------------------------

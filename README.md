@@ -379,12 +379,13 @@ For the full AI summary (categories, timeline highlights, flagged content analys
 
 ### Email account (SMTP)
 
-Vigil sends email through your own existing email account using SMTP — no third-party service needed. You provide your email address, an app password, and your provider's server address.
+Vigil sends email through your own existing email account using SMTP — no third-party service needed. You provide your email address and an app password; the installer auto-detects the server settings for you.
 
 | Provider | `SMTP_HOST` | `SMTP_PORT` |
 |---|---|---|
 | Gmail | `smtp.gmail.com` | `587` |
 | Outlook / Microsoft 365 | `smtp.office365.com` | `587` |
+| Yahoo Mail | `smtp.mail.yahoo.com` | `587` |
 | Fastmail | `smtp.fastmail.com` | `587` |
 | Apple iCloud | `smtp.mail.me.com` | `587` |
 
@@ -392,10 +393,13 @@ Vigil sends email through your own existing email account using SMTP — no thir
 
 - **Gmail** — [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords). Requires 2-Step Verification.
 - **iCloud** — [appleid.apple.com](https://appleid.apple.com) → Sign-In and Security → App-Specific Passwords.
+- **Yahoo** — [help.yahoo.com](https://help.yahoo.com/kb/generate-third-party-passwords-sln15241.html). Requires 2-Step Verification.
 - **Fastmail** — [fastmail.com/settings/security](https://www.fastmail.com/settings/security/).
 - **Outlook** — normal password usually works; generate an app password if your org enforces MFA.
 
 > **Tip:** Put both your address and your partner's in `SMTP_TO` (comma-separated). Both receive every digest and every alert. You can use a spare account as the sender.
+
+> **If emails stop arriving after install**, run `bash platforms/macos/install.sh --update` (macOS) or `platforms\windows\install.bat -Update` (Windows) to re-enter your SMTP credentials.
 
 ---
 
@@ -458,12 +462,12 @@ bash platforms/macos/install.sh
 
 The installer will:
 1. Verify macOS version, Python, and required files
-2. Prompt for any missing credentials
-3. Validate your SMTP connection (and OpenAI key if provided)
+2. Walk you through `.env` configuration interactively — auto-detects your SMTP server from your email address, and verifies your credentials immediately after you paste your app password (retry in-place if wrong)
+3. Validate your OpenAI key (if provided)
 4. Install Python packages
 5. Invite your partner to set a PIN (stored securely in macOS Keychain — only they should know it)
 6. Start both background services (auto-restart on crash, auto-start on login)
-7. Send a confirmation email
+7. Send a confirmation email — if delivery fails, the installer shows your configured SMTP settings and the exact command to fix them
 
 > **Permissions:** On first run, macOS will show dialogs asking Vigil to control your browsers. Click **OK** on each one — this is required for URL tracking.
 
@@ -490,11 +494,12 @@ If you prefer to run the PowerShell script directly, see the [execution policy n
 
 The installer will:
 1. Verify Windows 10+ and Python 3.8+
-2. Walk you through `.env` configuration interactively
-3. Validate your SMTP connection
-4. Install Python packages via pip
+2. Walk you through `.env` configuration interactively — auto-detects your SMTP server from your email address, and verifies your credentials immediately after you paste your app password (retry in-place if wrong)
+3. Install Python packages via pip
+4. Validate your OpenAI key (if provided)
 5. Invite your partner to set a PIN (stored securely in Windows Credential Locker — only they should know it)
 6. Register both services in Task Scheduler (auto-restart on crash, auto-start at logon)
+7. Send a confirmation email — if delivery fails, the installer shows your configured SMTP settings and the exact command to fix them
 
 ```bat
 platforms\windows\install.bat -Status      # check if services are running

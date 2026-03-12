@@ -553,6 +553,7 @@ PYEOF
 
 # Initialise SMTP auto-detection state.
 SMTP_HOST_AUTO_FILLED=false
+SMTP_PASS_VERIFIED=false
 SMTP_USER_ENTERED=""
 SMTP_DETECTED_HOST=""; SMTP_DETECTED_PORT=587
 SMTP_DETECTED_APPPASS_URL=""; SMTP_DETECTED_APPPASS_LABEL=""
@@ -620,10 +621,48 @@ if [[ ${#MISSING_VARS[@]} -gt 0 ]]; then
                     echo "  iCloud  → https://appleid.apple.com/account/manage"
                     echo "  Outlook → https://aka.ms/AppPasswords"
                 fi
+                echo "  After generating your app password, come back here and paste it below."
+                _test_host=$(read_env_value "SMTP_HOST"); _test_host="${_test_host:-smtp.gmail.com}"
+                _test_port=$(read_env_value "SMTP_PORT"); _test_port="${_test_port:-587}"
+                _test_user=$(read_env_value "SMTP_USER"); [[ -z "$_test_user" ]] && _test_user="$SMTP_USER_ENTERED"
                 while true; do
                     read -r -s -p "  Password: " entered_val; echo ""
-                    [[ -n "$entered_val" ]] && break
-                    echo -e "  ${RED}Value cannot be empty.${NC}"
+                    if [[ -z "$entered_val" ]]; then
+                        echo -e "  ${RED}Value cannot be empty.${NC}"
+                        continue
+                    fi
+                    _start_spinner "Verifying SMTP credentials..."
+                    _smtp_inline=$("$PYTHON_PATH" - \
+                        "$_test_host" "$_test_port" "$_test_user" "$entered_val" <<'PYEOF' 2>&1 || true
+import smtplib, ssl, sys
+host, port, user, pw = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+try:
+    if port == 465:
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP_SSL(host, port, context=ctx, timeout=10) as s:
+            s.login(user, pw)
+    else:
+        with smtplib.SMTP(host, port, timeout=10) as s:
+            s.ehlo(); s.starttls(); s.ehlo(); s.login(user, pw)
+    print("ok")
+except smtplib.SMTPAuthenticationError:
+    print("auth_failed"); sys.exit(1)
+except Exception as e:
+    print(f"error: {e}"); sys.exit(2)
+PYEOF
+                    )
+                    _stop_spinner
+                    if [[ "$_smtp_inline" == "ok" ]]; then
+                        info "SMTP credentials verified ✓"
+                        SMTP_PASS_VERIFIED=true
+                        break
+                    elif [[ "$_smtp_inline" == "auth_failed" ]]; then
+                        echo -e "  ${RED}Authentication failed.${NC} Double-check your app password and try again."
+                        echo "  Ensure 2FA is enabled and you copied the app password (not your sign-in password)."
+                    else
+                        warn "Could not connect to SMTP (${_smtp_inline}) — saving anyway. Check your internet connection."
+                        break
+                    fi
                 done
                 ;;
             SMTP_TO)
@@ -804,6 +843,7 @@ else
 fi
 
 # Test SMTP credentials by connecting and authenticating (no email sent)
+if [[ "$SMTP_PASS_VERIFIED" == false ]]; then
 _start_spinner "Validating SMTP credentials..."
 SMTP_TEST=$("$PYTHON_PATH" - \
     "${SMTP_HOST}" "${SMTP_PORT:-587}" "${SMTP_USER}" "${SMTP_PASS}" <<'PYEOF' 2>&1 || true
@@ -832,6 +872,7 @@ elif [[ "$SMTP_TEST" == "auth_failed" ]]; then
 else
     warn "Could not verify SMTP credentials: ${SMTP_TEST} — check your internet connection."
 fi
+fi # end SMTP_PASS_VERIFIED=false check
 
 fi # end REINSTALL=false validation block
 
@@ -947,8 +988,22 @@ _stop_spinner
 if (( _confirm_result == 0 )); then
     info "Confirmation email sent to ${SMTP_TO} ✓"
 else
-    warn "Confirmation email failed — check your SMTP credentials."
-    warn "The services are still running; this does not affect normal operation."
+    echo ""
+    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${RED}  ⚠️  Could not send confirmation email${NC}"
+    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo "  Vigil is running but email delivery is not working."
+    echo "  You will not receive digests or alerts until this is fixed."
+    echo ""
+    echo "  Configured SMTP:"
+    echo "    Host : $(read_env_value "SMTP_HOST"):$(read_env_value "SMTP_PORT")"
+    echo "    User : $(read_env_value "SMTP_USER")"
+    echo "    To   : $(read_env_value "SMTP_TO")"
+    echo ""
+    echo "  To fix:  bash $SCRIPT_DIR/install.sh --update"
+    echo "  (re-enter your SMTP credentials)"
+    echo ""
 fi
 
 # ── Done ───────────────────────────────────────────────────────────────────
