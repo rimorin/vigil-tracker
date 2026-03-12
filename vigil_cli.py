@@ -51,6 +51,22 @@ _FAIL = f"{_RED}✗{_NC}"
 
 # ── visual helpers ────────────────────────────────────────────────────────────
 
+_LOGO = """\
+  ██╗   ██╗██╗ ██████╗ ██╗██╗
+  ██║   ██║██║██╔════╝ ██║██║
+  ██║   ██║██║██║  ███╗██║██║
+  ╚██╗ ██╔╝██║██║   ██║██║██║
+   ╚████╔╝ ██║╚██████╔╝██║███████╗
+    ╚═══╝  ╚═╝ ╚═════╝ ╚═╝╚══════╝"""
+
+def _print_banner() -> None:
+    """Print the Vigil logo banner. Only called when stdout is a TTY."""
+    if not _USE_COLOR:
+        return
+    print(f"\n{_CYAN}{_BOLD}{_LOGO}{_NC}")
+    print(f"  {_DIM}◉  Always Watching  ·  v{__version__}{_NC}\n")
+
+
 _SECTION_WIDTH = 52  # total width of the section rule line
 
 def _section(title: str) -> None:
@@ -473,6 +489,7 @@ def main() -> None:
     sub.add_parser("uninstall", help="Stop services and remove Vigil from this machine")
     sub.add_parser("doctor",    help="Diagnose configuration and service issues")
 
+    _print_banner()
     args = parser.parse_args()
 
     {

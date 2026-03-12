@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 160" width="520" height="160">
+  <defs>
+    <radialGradient id="flameHalo" cx="50%" cy="60%" r="50%">
+      <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#0d1117" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="candleShine" cx="35%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="#fef9c3" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#d97706" stop-opacity="0.1"/>
+    </radialGradient>
+    <filter id="warmGlow">
+      <feGaussianBlur stdDeviation="2.8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="1.4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="520" height="160" rx="12" fill="#0d1117"/>
+
+  <!-- Warm glow behind candle -->
+  <ellipse cx="72" cy="90" rx="52" ry="56" fill="url(#flameHalo)"/>
+
+  <!-- Candle body -->
+  <rect x="58" y="96" width="28" height="46" rx="3"
+        fill="url(#candleShine)" stroke="#d97706" stroke-width="1.4" opacity="0.85"/>
+
+  <!-- Candle top rim -->
+  <ellipse cx="72" cy="96" rx="14" ry="3.5" fill="#fef3c7" fill-opacity="0.35" stroke="#d97706" stroke-width="1"/>
+
+  <!-- Wax drip left -->
+  <path d="M 60 108 Q 56 116 58 122 Q 59 126 62 124 L 62 108 Z"
+        fill="#fef3c7" fill-opacity="0.25"/>
+
+  <!-- Wick -->
+  <line x1="72" y1="96" x2="72" y2="88" stroke="#78350f" stroke-width="1.6" stroke-linecap="round"/>
+
+  <!-- Outer flame -->
+  <path d="M 72 46 C 82 58 86 72 80 84 C 76 90 68 90 64 84 C 58 72 62 58 72 46 Z"
+        fill="#f59e0b" fill-opacity="0.85" filter="url(#warmGlow)"/>
+
+  <!-- Mid flame -->
+  <path d="M 72 54 C 79 64 81 75 76 84 C 74 87 70 87 68 84 C 63 75 65 64 72 54 Z"
+        fill="#fbbf24"/>
+
+  <!-- Inner flame core -->
+  <path d="M 72 62 C 76 70 76 78 72 84 C 68 78 68 70 72 62 Z"
+        fill="#fef9c3" filter="url(#softGlow)"/>
+
+  <!-- VIGIL wordmark -->
+  <text x="140" y="97"
+        font-family="Georgia, 'Times New Roman', serif"
+        font-size="60"
+        font-weight="700"
+        letter-spacing="5"
+        fill="#f5f5f0"
+        filter="url(#softGlow)">VIGIL</text>
+
+  <!-- Divider -->
+  <line x1="140" y1="109" x2="500" y2="109" stroke="#d97706" stroke-width="0.7" opacity="0.3"/>
+
+  <!-- Tagline -->
+  <text x="142" y="126"
+        font-family="'Helvetica Neue', Arial, sans-serif"
+        font-size="12"
+        letter-spacing="3.8"
+        fill="#d97706"
+        opacity="0.85">ACCOUNTABILITY TRACKER</text>
+</svg>

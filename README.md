@@ -1,4 +1,6 @@
-# Vigil
+<p align="center">
+  <img src="assets/logo.svg" alt="Vigil logo" width="520"/>
+</p>
 
 > **🧪 Experimental** — early-stage project. Things may break. Please report any issues you find.
 
