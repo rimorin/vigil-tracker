@@ -25,6 +25,38 @@ warn()  { echo -e "${YELLOW}[install]${NC} $*"; }
 error() { echo -e "${RED}[install]${NC} $*" >&2; exit 1; }
 step()  { echo -e "\n${BOLD}${CYAN}▶  $*${NC}"; }
 
+# ── SMTP auto-detect: infer host/port + app-password URL from email domain ──
+# Sets globals: SMTP_DETECTED_HOST, SMTP_DETECTED_PORT,
+#               SMTP_DETECTED_APPPASS_URL, SMTP_DETECTED_APPPASS_LABEL
+_smtp_auto_detect() {
+    local email="$1"
+    local domain; domain=$(echo "${email##*@}" | tr '[:upper:]' '[:lower:]')
+    SMTP_DETECTED_HOST=""; SMTP_DETECTED_PORT=587
+    SMTP_DETECTED_APPPASS_URL=""; SMTP_DETECTED_APPPASS_LABEL=""
+    case "$domain" in
+        gmail.com|googlemail.com)
+            SMTP_DETECTED_HOST="smtp.gmail.com"; SMTP_DETECTED_PORT=587
+            SMTP_DETECTED_APPPASS_URL="https://myaccount.google.com/apppasswords"
+            SMTP_DETECTED_APPPASS_LABEL="Gmail App Password" ;;
+        outlook.com|hotmail.com|hotmail.co.uk|live.com|live.co.uk|msn.com)
+            SMTP_DETECTED_HOST="smtp.office365.com"; SMTP_DETECTED_PORT=587
+            SMTP_DETECTED_APPPASS_URL="https://aka.ms/AppPasswords"
+            SMTP_DETECTED_APPPASS_LABEL="Microsoft App Password" ;;
+        yahoo.com|yahoo.co.uk|ymail.com)
+            SMTP_DETECTED_HOST="smtp.mail.yahoo.com"; SMTP_DETECTED_PORT=587
+            SMTP_DETECTED_APPPASS_URL="https://help.yahoo.com/kb/generate-third-party-passwords-sln15241.html"
+            SMTP_DETECTED_APPPASS_LABEL="Yahoo App Password" ;;
+        icloud.com|me.com|mac.com)
+            SMTP_DETECTED_HOST="smtp.mail.me.com"; SMTP_DETECTED_PORT=587
+            SMTP_DETECTED_APPPASS_URL="https://appleid.apple.com/account/manage"
+            SMTP_DETECTED_APPPASS_LABEL="iCloud App-Specific Password" ;;
+        fastmail.com|fastmail.fm|fastmail.net)
+            SMTP_DETECTED_HOST="smtp.fastmail.com"; SMTP_DETECTED_PORT=587
+            SMTP_DETECTED_APPPASS_URL="https://app.fastmail.com/settings/security/devicekeys/"
+            SMTP_DETECTED_APPPASS_LABEL="Fastmail App Password" ;;
+    esac
+}
+
 # ── Spinner (animated indicator for long-running operations) ───────────────
 _SPIN_PID=""
 _start_spinner() {
@@ -519,7 +551,26 @@ PYEOF
 # Create .env from template if missing
 [[ ! -f "$ENV_FILE" ]] && cp "$ENV_TEMPLATE" "$ENV_FILE"
 
-REQUIRED_VARS=(SMTP_HOST SMTP_USER SMTP_PASS SMTP_TO)
+# Initialise SMTP auto-detection state.
+SMTP_HOST_AUTO_FILLED=false
+SMTP_USER_ENTERED=""
+SMTP_DETECTED_HOST=""; SMTP_DETECTED_PORT=587
+SMTP_DETECTED_APPPASS_URL=""; SMTP_DETECTED_APPPASS_LABEL=""
+
+# If SMTP_USER is already configured, pre-run auto-detection so we can silently
+# fill SMTP_HOST/PORT without asking the user for them again.
+_existing_smtp_user=$(read_env_value "SMTP_USER")
+if [[ -n "$_existing_smtp_user" ]]; then
+    _smtp_auto_detect "$_existing_smtp_user"
+    if [[ -n "$SMTP_DETECTED_HOST" ]] && [[ -z "$(read_env_value "SMTP_HOST")" ]]; then
+        write_env_value "SMTP_HOST" "$SMTP_DETECTED_HOST"
+        write_env_value "SMTP_PORT" "$SMTP_DETECTED_PORT"
+        SMTP_HOST_AUTO_FILLED=true
+    fi
+fi
+
+# SMTP_USER is listed first so we can auto-detect SMTP_HOST/PORT from it.
+REQUIRED_VARS=(SMTP_USER SMTP_HOST SMTP_PASS SMTP_TO)
 MISSING_VARS=()
 for var in "${REQUIRED_VARS[@]}"; do
     val=$(read_env_value "$var")
@@ -529,43 +580,88 @@ done
 if [[ ${#MISSING_VARS[@]} -gt 0 ]]; then
     echo ""
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}  📝  Setup wizard — enter your API keys${NC}"
+    echo -e "${YELLOW}  📝  Setup wizard — just a few questions to get started${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    echo "  The following values are missing from .env."
     echo "  Enter them now, or press Ctrl-C to edit .env manually."
     echo ""
     for var in "${MISSING_VARS[@]}"; do
+        # SMTP_HOST was auto-detected from the email address — skip it.
+        if [[ "$var" == "SMTP_HOST" && "$SMTP_HOST_AUTO_FILLED" == true ]]; then
+            continue
+        fi
+
+        entered_val=""
         case "$var" in
-            OPENAI_API_KEY)
-                echo -e "  ${CYAN}OpenAI API key${NC} ${YELLOW}(optional)${NC}"
-                echo "  Leave blank to receive a plain visit list instead of an AI summary."
-                echo "  → https://platform.openai.com/api-keys"
+            SMTP_USER)
+                echo -e "  ${CYAN}Your email address${NC} (used as the sender for digest emails)"
+                while true; do
+                    read -r -p "  Email: " entered_val
+                    [[ -n "$entered_val" ]] && break
+                    echo -e "  ${RED}Value cannot be empty.${NC}"
+                done
                 ;;
             SMTP_HOST)
                 echo -e "  ${CYAN}SMTP server hostname${NC}"
                 echo "  Gmail: smtp.gmail.com  |  Outlook: smtp.office365.com  |  Fastmail: smtp.fastmail.com"
-                ;;
-            SMTP_USER)
-                echo -e "  ${CYAN}SMTP username${NC} (usually your full email address)"
+                while true; do
+                    read -r -p "  SMTP_HOST: " entered_val
+                    [[ -n "$entered_val" ]] && break
+                    echo -e "  ${RED}Value cannot be empty.${NC}"
+                done
                 ;;
             SMTP_PASS)
                 echo -e "  ${CYAN}SMTP password / app password${NC}"
-                echo "  Gmail users: create an App Password at https://myaccount.google.com/apppasswords"
+                if [[ -n "$SMTP_DETECTED_APPPASS_URL" ]]; then
+                    echo "  Create a ${SMTP_DETECTED_APPPASS_LABEL}: ${SMTP_DETECTED_APPPASS_URL}"
+                else
+                    echo "  Use an app password — not your regular sign-in password."
+                    echo "  Gmail   → https://myaccount.google.com/apppasswords"
+                    echo "  iCloud  → https://appleid.apple.com/account/manage"
+                    echo "  Outlook → https://aka.ms/AppPasswords"
+                fi
+                while true; do
+                    read -r -s -p "  Password: " entered_val; echo ""
+                    [[ -n "$entered_val" ]] && break
+                    echo -e "  ${RED}Value cannot be empty.${NC}"
+                done
                 ;;
             SMTP_TO)
                 echo -e "  ${CYAN}Recipient email address(es)${NC}"
-                echo "  Comma-separate to add an accountability partner, e.g. you@example.com,partner@example.com"
+                # Default to the sender email so the user doesn't have to type it twice.
+                _smtp_to_default=$(read_env_value "SMTP_USER")
+                [[ -z "$_smtp_to_default" ]] && _smtp_to_default="$SMTP_USER_ENTERED"
+                if [[ -n "$_smtp_to_default" ]]; then
+                    echo "  Add your accountability partner's email too (comma-separated)."
+                    read -r -p "  Send to [${_smtp_to_default}]: " entered_val
+                    entered_val="${entered_val:-$_smtp_to_default}"
+                else
+                    echo "  Comma-separate: you@example.com,partner@example.com"
+                    while true; do
+                        read -r -p "  SMTP_TO: " entered_val
+                        [[ -n "$entered_val" ]] && break
+                        echo -e "  ${RED}Value cannot be empty.${NC}"
+                    done
+                fi
                 ;;
         esac
-        while true; do
-            read -r -p "  ${var}: " entered_val
-            [[ -n "$entered_val" ]] && break
-            echo -e "  ${RED}Value cannot be empty.${NC}"
-        done
+
         write_env_value "$var" "$entered_val"
         info "Saved ${var} ✓"
-        # Immediately prompt for SMTP_PORT after SMTP_HOST (has a sensible default)
+
+        # After SMTP_USER: auto-detect SMTP_HOST/PORT from the email domain.
+        if [[ "$var" == "SMTP_USER" ]]; then
+            SMTP_USER_ENTERED="$entered_val"
+            _smtp_auto_detect "$entered_val"
+            if [[ -n "$SMTP_DETECTED_HOST" ]] && [[ -z "$(read_env_value "SMTP_HOST")" ]]; then
+                write_env_value "SMTP_HOST" "$SMTP_DETECTED_HOST"
+                write_env_value "SMTP_PORT" "$SMTP_DETECTED_PORT"
+                info "Auto-detected SMTP settings: ${SMTP_DETECTED_HOST}:${SMTP_DETECTED_PORT} ✓"
+                SMTP_HOST_AUTO_FILLED=true
+            fi
+        fi
+
+        # After SMTP_HOST (when entered manually): also prompt for SMTP_PORT.
         if [[ "$var" == "SMTP_HOST" ]]; then
             echo ""
             echo -e "  ${CYAN}SMTP port${NC}"
@@ -575,6 +671,7 @@ if [[ ${#MISSING_VARS[@]} -gt 0 ]]; then
             write_env_value "SMTP_PORT" "${port_val:-${cur_port}}"
             info "Saved SMTP_PORT ✓"
         fi
+
         echo ""
     done
 fi

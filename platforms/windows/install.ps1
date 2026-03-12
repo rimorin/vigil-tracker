@@ -148,11 +148,45 @@ function Write-EnvValue ($key, $value) {
 function Prompt-Val ($label, $current, [switch]$Secret) {
     $hint = if ($current) { " [$current]" } else { "" }
     if ($Secret) {
-        $val = Read-Host "  ${label}"
-        if ($val) { return $val } else { return $current }
+        $secure = Read-Host "  ${label}" -AsSecureString
+        $bstr   = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+        $plain  = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+        if ($plain) { return $plain } else { return $current }
     }
     $val = Read-Host "  ${label}${hint}"
     if ($val) { return $val } else { return $current }
+}
+
+# Infer SMTP host, port, and app-password URL from an email domain.
+# Sets script-scope vars: SmtpDetectedHost, SmtpDetectedPort,
+#                         SmtpDetectedAppPassUrl, SmtpDetectedAppPassLabel
+function Invoke-SmtpAutoDetect ($email) {
+    $domain = ($email -split '@')[-1].ToLower()
+    $script:SmtpDetectedHost = ""; $script:SmtpDetectedPort = 587
+    $script:SmtpDetectedAppPassUrl = ""; $script:SmtpDetectedAppPassLabel = ""
+    switch -Wildcard ($domain) {
+        { $_ -in @('gmail.com','googlemail.com') } {
+            $script:SmtpDetectedHost = "smtp.gmail.com"; $script:SmtpDetectedPort = 587
+            $script:SmtpDetectedAppPassUrl   = "https://myaccount.google.com/apppasswords"
+            $script:SmtpDetectedAppPassLabel = "Gmail App Password"; break }
+        { $_ -in @('outlook.com','hotmail.com','hotmail.co.uk','live.com','live.co.uk','msn.com') } {
+            $script:SmtpDetectedHost = "smtp.office365.com"; $script:SmtpDetectedPort = 587
+            $script:SmtpDetectedAppPassUrl   = "https://aka.ms/AppPasswords"
+            $script:SmtpDetectedAppPassLabel = "Microsoft App Password"; break }
+        { $_ -in @('yahoo.com','yahoo.co.uk','ymail.com') } {
+            $script:SmtpDetectedHost = "smtp.mail.yahoo.com"; $script:SmtpDetectedPort = 587
+            $script:SmtpDetectedAppPassUrl   = "https://help.yahoo.com/kb/generate-third-party-passwords-sln15241.html"
+            $script:SmtpDetectedAppPassLabel = "Yahoo App Password"; break }
+        { $_ -in @('icloud.com','me.com','mac.com') } {
+            $script:SmtpDetectedHost = "smtp.mail.me.com"; $script:SmtpDetectedPort = 587
+            $script:SmtpDetectedAppPassUrl   = "https://appleid.apple.com/account/manage"
+            $script:SmtpDetectedAppPassLabel = "iCloud App-Specific Password"; break }
+        { $_ -in @('fastmail.com','fastmail.fm','fastmail.net') } {
+            $script:SmtpDetectedHost = "smtp.fastmail.com"; $script:SmtpDetectedPort = 587
+            $script:SmtpDetectedAppPassUrl   = "https://app.fastmail.com/settings/security/devicekeys/"
+            $script:SmtpDetectedAppPassLabel = "Fastmail App Password"; break }
+    }
 }
 
 # ============================================================================
@@ -549,59 +583,113 @@ if (-not $Reinstall) {
     # Create .env from template if missing
     if (-not (Test-Path $EnvFile)) { Copy-Item $EnvTemplate $EnvFile }
 
-    # Check which required values are missing / still placeholders
-    $requiredVars = @("SMTP_HOST", "SMTP_USER", "SMTP_PASS", "SMTP_TO")
+    # Initialise SMTP auto-detection state.
+    $script:SmtpHostAutoFilled    = $false
+    $script:SmtpUserEntered       = ""
+    $script:SmtpDetectedHost      = ""; $script:SmtpDetectedPort = 587
+    $script:SmtpDetectedAppPassUrl = ""; $script:SmtpDetectedAppPassLabel = ""
+
+    # If SMTP_USER is already configured, pre-run auto-detection so we can silently
+    # fill SMTP_HOST/PORT without asking the user for them again.
+    $existingSmtpUser = Read-EnvValue "SMTP_USER"
+    if ($existingSmtpUser) {
+        Invoke-SmtpAutoDetect $existingSmtpUser
+        if ($script:SmtpDetectedHost -and -not (Read-EnvValue "SMTP_HOST")) {
+            Write-EnvValue "SMTP_HOST" $script:SmtpDetectedHost
+            Write-EnvValue "SMTP_PORT" $script:SmtpDetectedPort
+            $script:SmtpHostAutoFilled = $true
+        }
+    }
+
+    # SMTP_USER is listed first so we can auto-detect SMTP_HOST/PORT from it.
+    $requiredVars = @("SMTP_USER", "SMTP_HOST", "SMTP_PASS", "SMTP_TO")
     $missingVars  = $requiredVars | Where-Object { -not (Read-EnvValue $_) }
 
     if ($missingVars) {
         Write-Host ""
         Write-Host "  ----------------------------------------------------------------" -ForegroundColor Yellow
-        Write-Host "    Setup wizard - enter your API keys" -ForegroundColor Yellow
+        Write-Host "    Setup wizard - just a few questions to get started" -ForegroundColor Yellow
         Write-Host "  ----------------------------------------------------------------" -ForegroundColor Yellow
         Write-Host ""
-        Write-Host "  The following values are missing from .env."
         Write-Host "  Enter them now, or press Ctrl-C to edit .env manually."
         Write-Host ""
 
         foreach ($var in $missingVars) {
+            # SMTP_HOST was auto-detected from the email address — skip it.
+            if ($var -eq "SMTP_HOST" -and $script:SmtpHostAutoFilled) { continue }
+
+            $entered = ""
             switch ($var) {
+                "SMTP_USER" {
+                    Write-Host "  Your email address (used as the sender for digest emails)" -ForegroundColor Cyan
+                    do { $entered = Read-Host "  Email" } while (-not $entered)
+                }
                 "SMTP_HOST" {
                     Write-Host "  SMTP server hostname" -ForegroundColor Cyan
                     Write-Host "  Gmail: smtp.gmail.com  |  Outlook: smtp.office365.com  |  Fastmail: smtp.fastmail.com"
-                }
-                "SMTP_USER" {
-                    Write-Host "  SMTP username (usually your full email address)" -ForegroundColor Cyan
+                    do { $entered = Read-Host "  SMTP_HOST" } while (-not $entered)
                 }
                 "SMTP_PASS" {
                     Write-Host "  SMTP password / app password" -ForegroundColor Cyan
-                    Write-Host "  Gmail users: create an App Password at https://myaccount.google.com/apppasswords"
+                    if ($script:SmtpDetectedAppPassUrl) {
+                        Write-Host "  Create a $($script:SmtpDetectedAppPassLabel): $($script:SmtpDetectedAppPassUrl)"
+                    } else {
+                        Write-Host "  Use an app password - not your regular sign-in password."
+                        Write-Host "  Gmail   -> https://myaccount.google.com/apppasswords"
+                        Write-Host "  iCloud  -> https://appleid.apple.com/account/manage"
+                        Write-Host "  Outlook -> https://aka.ms/AppPasswords"
+                    }
+                    do {
+                        $secure = Read-Host "  Password" -AsSecureString
+                        $bstr   = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+                        $entered = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+                        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+                    } while (-not $entered)
                 }
                 "SMTP_TO" {
                     Write-Host "  Recipient email address(es)" -ForegroundColor Cyan
-                    Write-Host "  Comma-separate multiple: you@example.com,partner@example.com"
+                    # Default to the sender email so the user doesn't have to type it twice.
+                    $smtpToDefault = Read-EnvValue "SMTP_USER"
+                    if (-not $smtpToDefault) { $smtpToDefault = $script:SmtpUserEntered }
+                    if ($smtpToDefault) {
+                        Write-Host "  Add your accountability partner's email too (comma-separated)."
+                        $entered = Read-Host "  Send to [$smtpToDefault]"
+                        if (-not $entered) { $entered = $smtpToDefault }
+                    } else {
+                        Write-Host "  Comma-separate: you@example.com,partner@example.com"
+                        do { $entered = Read-Host "  SMTP_TO" } while (-not $entered)
+                    }
                 }
             }
-            do {
-                if ($var -eq "SMTP_PASS") {
-                    $entered = Read-Host "  ${var}"
-                } else {
-                    $entered = Read-Host "  ${var}"
-                }
-            } while (-not $entered)
+
             Write-EnvValue $var $entered
             Write-OK "Saved ${var}"
-            # Immediately prompt for SMTP_PORT after SMTP_HOST (has a sensible default)
+
+            # After SMTP_USER: auto-detect SMTP_HOST/PORT from the email domain.
+            if ($var -eq "SMTP_USER") {
+                $script:SmtpUserEntered = $entered
+                Invoke-SmtpAutoDetect $entered
+                if ($script:SmtpDetectedHost -and -not (Read-EnvValue "SMTP_HOST")) {
+                    Write-EnvValue "SMTP_HOST" $script:SmtpDetectedHost
+                    Write-EnvValue "SMTP_PORT" $script:SmtpDetectedPort
+                    Write-OK "Auto-detected SMTP settings: $($script:SmtpDetectedHost):$($script:SmtpDetectedPort)"
+                    $script:SmtpHostAutoFilled = $true
+                }
+            }
+
+            # After SMTP_HOST (when entered manually): also prompt for SMTP_PORT.
             if ($var -eq "SMTP_HOST") {
                 Write-Host ""
                 Write-Host "  SMTP port" -ForegroundColor Cyan
                 Write-Host "  587 = STARTTLS (most providers)  |  465 = SSL/TLS (implicit)"
-                $curPort = (Read-EnvValue "SMTP_PORT")
+                $curPort = Read-EnvValue "SMTP_PORT"
                 if (-not $curPort) { $curPort = "587" }
                 $portVal = Read-Host "  SMTP_PORT [$curPort]"
                 if (-not $portVal) { $portVal = $curPort }
                 Write-EnvValue "SMTP_PORT" $portVal
                 Write-OK "Saved SMTP_PORT"
             }
+
             Write-Host ""
         }
     }
