@@ -64,7 +64,7 @@ def _print_banner() -> None:
     if not _USE_COLOR:
         return
     print(f"\n{_CYAN}{_BOLD}{_LOGO}{_NC}")
-    print(f"  {_DIM}◉  Always Watching  ·  v{__version__}{_NC}\n")
+    print(f"  {_DIM}◉  Stay Accountable  ·  v{__version__}{_NC}\n")
 
 
 _SECTION_WIDTH = 52  # total width of the section rule line
