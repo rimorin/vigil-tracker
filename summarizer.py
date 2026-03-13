@@ -13,7 +13,9 @@ Run directly or managed by launchd (KeepAlive=true).
 """
 
 import concurrent.futures
+import csv
 import hashlib
+import io
 import logging
 import re
 import signal
@@ -21,6 +23,7 @@ import smtplib
 import ssl
 import subprocess
 import sys
+import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from logging.handlers import RotatingFileHandler
@@ -50,6 +53,13 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 ACTIVITY_LOG = APP_SUPPORT_DIR / "detailed_activity_log.txt"
 INTEGRITY_FILE = APP_SUPPORT_DIR / "detailed_activity_log.txt.sha256"
 SENTINEL_FILE = APP_SUPPORT_DIR / "last_summarized_date.txt"
+WATCHDOG_HEARTBEAT_FILE = APP_SUPPORT_DIR / "watchdog_heartbeat"
+SUMMARIZER_HEARTBEAT_FILE = APP_SUPPORT_DIR / "summarizer_heartbeat"
+
+# How many seconds without a heartbeat before alerting the partner.
+# Both daemons write a heartbeat every ~60 s; 150 s = 2.5× that interval to
+# allow for launchd/Task-Scheduler restart latency without false positives.
+_WATCHDOG_HEARTBEAT_STALE_SECS = 150
 SUMMARIZER_LOG = LOG_DIR / "summarizer_daemon.log"
 PID_FILE = APP_SUPPORT_DIR / "summarizer.pid"
 
@@ -60,6 +70,11 @@ MAX_RESPONSE_TOKENS = 1500
 
 _scheduler: Optional[object] = None
 _openai_client: Optional[object] = None
+
+# Heartbeat presence flags — set True the first time each file is successfully
+# read.  If a file disappears after having been seen, that's treated as
+# tampering rather than "not yet installed".
+_watchdog_heartbeat_ever_seen: bool = False
 
 # Rotating file logger — 5 MB per file, keep 3 backups
 _handler = RotatingFileHandler(SUMMARIZER_LOG, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
@@ -390,8 +405,16 @@ def _send_alert_email(subject: str, html_body: str, plain_text: str,
 
 def _verify_log_integrity() -> bool:
     """Return False if the activity log SHA-256 doesn't match the stored sidecar hash."""
-    if not INTEGRITY_FILE.exists() or not ACTIVITY_LOG.exists():
-        return True  # nothing to compare yet
+    if not INTEGRITY_FILE.exists() and not ACTIVITY_LOG.exists():
+        # If the summarizer has run before (sentinel exists), both files being
+        # absent means they were deleted — treat that as tampered.
+        if SENTINEL_FILE.exists():
+            return False
+        return True  # genuine first run — nothing to compare yet
+    if not INTEGRITY_FILE.exists():
+        return True  # no hash baseline yet; integrity check not yet applicable
+    if not ACTIVITY_LOG.exists():
+        return False  # hash baseline exists but log was deleted → tampered
     expected = INTEGRITY_FILE.read_text().strip()
     actual = hashlib.sha256(ACTIVITY_LOG.read_bytes()).hexdigest()
     return actual == expected
@@ -451,6 +474,90 @@ def _check_env_integrity():
         )
     except Exception as exc:
         _log(f"Failed to send .env tamper alert: {exc}")
+
+
+def _check_watchdog_heartbeat() -> None:
+    """Alert the accountability partner if the watchdog heartbeat goes stale or is deleted.
+
+    The watchdog writes a Unix timestamp to WATCHDOG_HEARTBEAT_FILE on every
+    check loop (~60 s).  If that file is older than _WATCHDOG_HEARTBEAT_STALE_SECS
+    the watchdog was likely killed (including via SIGKILL, which cannot be caught
+    by a signal handler) and did not restart automatically.
+
+    If the file is missing after having been previously seen, that is treated as
+    deliberate deletion (a tamper attempt) rather than "not yet installed".
+    """
+    global _watchdog_heartbeat_ever_seen
+    if not WATCHDOG_HEARTBEAT_FILE.exists():
+        if _watchdog_heartbeat_ever_seen:
+            _log("⚠️ Watchdog heartbeat file deleted — possible tamper attempt.")
+            try:
+                _send_alert_email(
+                    subject=f"⚠️ Vigil — Watchdog Heartbeat File Deleted on {gethostname()}",
+                    html_body="""
+                    <h2>⚠️ Watchdog Heartbeat File Deleted</h2>
+                    <p>The Vigil watchdog heartbeat file has been deleted on
+                    <strong>{hostname}</strong>. This file is written automatically
+                    every ~60 seconds; its absence suggests a deliberate tamper
+                    attempt to disable SIGKILL detection.</p>
+                    <p>If you did not authorise this, please follow up with the
+                    person you are holding accountable immediately.</p>
+                    """.format(hostname=gethostname()),
+                    plain_text=(
+                        "⚠️ Watchdog Heartbeat File Deleted\n\n"
+                        "The Vigil watchdog heartbeat file has been deleted.\n"
+                        "This suggests a deliberate attempt to disable SIGKILL detection.\n\n"
+                        "If you did not authorise this, please follow up immediately."
+                    ),
+                )
+            except Exception as exc:
+                _log(f"Failed to send heartbeat-deleted alert: {exc}")
+        return  # file absent — either not installed yet, or just alerted above
+    _watchdog_heartbeat_ever_seen = True
+
+    try:
+        last_beat = float(WATCHDOG_HEARTBEAT_FILE.read_text().strip())
+    except (ValueError, OSError):
+        return  # malformed file; skip silently
+
+    age = time.time() - last_beat
+    if age <= _WATCHDOG_HEARTBEAT_STALE_SECS:
+        return  # heartbeat is fresh
+
+    _log(f"⚠️ Watchdog heartbeat stale ({age:.0f}s ago) — watchdog may be down.")
+    try:
+        _send_alert_email(
+            subject=f"⚠️ Vigil — Watchdog Heartbeat Stale on {gethostname()}",
+            html_body="""
+            <h2>⚠️ Watchdog Heartbeat Stale</h2>
+            <p>The Vigil watchdog process has not updated its heartbeat for over
+            2 minutes. This may mean it was forcibly killed (e.g. via
+            <code>kill -9</code>) and did not restart automatically.</p>
+            <p>If you did not authorise this, please follow up with the person
+            you are holding accountable immediately.</p>
+            """,
+            plain_text=(
+                "⚠️ Watchdog Heartbeat Stale\n\n"
+                "The Vigil watchdog process has not updated its heartbeat for over\n"
+                "2 minutes. This may mean it was killed and did not restart.\n\n"
+                "If you did not authorise this, please follow up immediately."
+            ),
+        )
+    except Exception as exc:
+        _log(f"Failed to send watchdog heartbeat alert: {exc}")
+
+
+def _write_summarizer_heartbeat() -> None:
+    """Write the current Unix timestamp to SUMMARIZER_HEARTBEAT_FILE.
+
+    Called on an ~60 s APScheduler interval so that watchdog.py can detect
+    when the summarizer is forcibly killed (SIGKILL) and did not restart.
+    Errors are swallowed — a write failure must not crash the scheduler.
+    """
+    try:
+        SUMMARIZER_HEARTBEAT_FILE.write_text(str(time.time()))
+    except Exception:
+        pass
 
 
 _tracker_was_running: bool = True  # module-level state for edge-transition alerting
@@ -518,11 +625,23 @@ def _cleanup_old_entries():
 def _check_tracker_alive():
     """Alert once when the tracker service transitions from running to stopped."""
     global _tracker_was_running
-    result = subprocess.run(
-        ['launchctl', 'list', 'com.vigil.tracker'],
-        capture_output=True,
-    )
-    running = result.returncode == 0
+    if sys.platform == "win32":
+        result = subprocess.run(
+            ["schtasks", "/query", "/tn", "Vigil Tracker", "/fo", "CSV", "/nh"],
+            capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+        )
+        running = False
+        if result.returncode == 0:
+            rows = list(csv.reader(io.StringIO(result.stdout.strip())))
+            if rows and len(rows[0]) >= 3:
+                running = rows[0][2].strip().lower() in ("running", "ready")
+    else:
+        result = subprocess.run(
+            ['launchctl', 'list', 'com.vigil.tracker'],
+            capture_output=True,
+        )
+        running = result.returncode == 0
 
     if not running and _tracker_was_running:
         _log("⚠️ Tracker service not running — sending alert.")
@@ -922,6 +1041,13 @@ def main():
     _scheduler = BlockingScheduler(timezone=get_localzone_name())
     _scheduler.add_job(run_summary, trigger, misfire_grace_time=86400)
     _scheduler.add_job(_check_tracker_alive, IntervalTrigger(minutes=5), id='watchdog')
+    _scheduler.add_job(_check_watchdog_heartbeat, IntervalTrigger(minutes=5), id='heartbeat_check')
+    _scheduler.add_job(
+        _write_summarizer_heartbeat,
+        IntervalTrigger(minutes=1),
+        id='summarizer_heartbeat',
+        next_run_time=datetime.now(),  # write immediately on startup so watchdog sees a fresh beat
+    )
     _scheduler.add_job(
         _cleanup_old_entries,
         IntervalTrigger(hours=24),

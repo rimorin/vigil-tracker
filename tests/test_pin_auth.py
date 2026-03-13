@@ -182,7 +182,8 @@ class TestKeychainHelpers:
 
 class TestCmdVerify:
     def test_no_pin_configured_returns_0(self):
-        with patch.object(pin_auth, "_get_stored_hash", return_value=""):
+        with patch.object(pin_auth, "_get_stored_hash", return_value=""), \
+             patch.object(pin_auth, "_pin_was_configured", return_value=False):
             assert pin_auth._cmd_verify() == 0
 
     def test_correct_pin_returns_0(self):
@@ -199,13 +200,38 @@ class TestCmdVerify:
             assert pin_auth._cmd_verify() == 1
 
     def test_empty_stored_hash_returns_0(self):
-        with patch.object(pin_auth, "_get_stored_hash", return_value=""):
+        with patch.object(pin_auth, "_get_stored_hash", return_value=""), \
+             patch.object(pin_auth, "_pin_was_configured", return_value=False):
             assert pin_auth._cmd_verify() == 0
 
-    def test_keychain_error_returns_0(self):
-        """Keychain read failure should not block uninstall."""
-        with patch.object(pin_auth, "_get_stored_hash", return_value=""):
-            assert pin_auth._cmd_verify() == 0
+    def test_blocks_when_pin_hash_deleted_but_sentinel_present(self):
+        """PIN hash deleted outside normal flow while sentinel remains → alert + block (return 1)."""
+        with patch.object(pin_auth, "_get_stored_hash", return_value=""), \
+             patch.object(pin_auth, "_pin_was_configured", return_value=True), \
+             patch.object(pin_auth, "_send_notification") as mock_notify:
+            result = pin_auth._cmd_verify()
+        assert result == 1
+        mock_notify.assert_called_once()
+        subject = mock_notify.call_args[1]["subject"]
+        assert "PIN" in subject
+
+    def test_alert_subject_mentions_pin_removed_on_tamper(self):
+        """Alert subject clearly identifies that the PIN was removed from the keychain."""
+        with patch.object(pin_auth, "_get_stored_hash", return_value=""), \
+             patch.object(pin_auth, "_pin_was_configured", return_value=True), \
+             patch.object(pin_auth, "_send_notification") as mock_notify:
+            pin_auth._cmd_verify()
+        subject = mock_notify.call_args[1]["subject"]
+        assert "Removed" in subject or "removed" in subject.lower()
+
+    def test_no_alert_when_no_pin_ever_configured(self):
+        """If neither hash nor sentinel is present, no notification is sent (no PIN configured)."""
+        with patch.object(pin_auth, "_get_stored_hash", return_value=""), \
+             patch.object(pin_auth, "_pin_was_configured", return_value=False), \
+             patch.object(pin_auth, "_send_notification") as mock_notify:
+            result = pin_auth._cmd_verify()
+        assert result == 0
+        mock_notify.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -253,19 +279,124 @@ class TestCmdHash:
 
 
 # ---------------------------------------------------------------------------
+# store_env_hash / verify_env_hash / env-hash sentinel  (H1 tamper defence)
+# ---------------------------------------------------------------------------
+
+def _write_env(tmp_path, smtp_to: str = "partner@example.com") -> Path:
+    env = tmp_path / ".env"
+    env.write_text(
+        "SMTP_HOST=smtp.example.com\nSMTP_PORT=587\n"
+        f"SMTP_USER=user\nSMTP_PASS=pass\nSMTP_TO={smtp_to}\nALERT_ENABLED=true\n"
+    )
+    return env
+
+
+class TestStoreEnvHash:
+    """store_env_hash writes hash, sentinel, and original SMTP_TO to keychain."""
+
+    def test_writes_hash_to_keychain(self, tmp_path):
+        stored = {}
+        with patch("keyring.set_password", side_effect=lambda s, a, v: stored.update({a: v})):
+            pin_auth.store_env_hash(_write_env(tmp_path))
+        assert "env_critical_hash" in stored
+        assert len(stored["env_critical_hash"]) == 64  # SHA-256 hex digest
+
+    def test_writes_configured_sentinel(self, tmp_path):
+        stored = {}
+        with patch("keyring.set_password", side_effect=lambda s, a, v: stored.update({a: v})):
+            pin_auth.store_env_hash(_write_env(tmp_path))
+        assert stored.get("env_hash_configured") == "1"
+
+    def test_writes_original_smtp_to(self, tmp_path):
+        stored = {}
+        with patch("keyring.set_password", side_effect=lambda s, a, v: stored.update({a: v})):
+            pin_auth.store_env_hash(_write_env(tmp_path, smtp_to="accountability@example.com"))
+        assert stored.get("env_original_smtp_to") == "accountability@example.com"
+
+
+class TestVerifyEnvHash:
+    """verify_env_hash tamper-detection sentinel scenarios (H1).
+
+    Scenario matrix:
+      A. No hash, no sentinel       → True  (genuine first run)
+      B. Hash stored, file unchanged → True  (clean state)
+      C. Hash stored, file tampered  → False (content change)
+      D. Hash deleted, sentinel kept → False (hash deleted outside normal flow)
+      E. Both deleted                → True  (indistinguishable from A; inherent limit)
+      F. Keychain unavailable        → True  (fail-open; don't block summarizer)
+    """
+
+    def test_returns_true_before_any_store(self, tmp_path):
+        """Scenario A: genuine first run with no baseline → pass."""
+        with patch("keyring.get_password", return_value=None):
+            assert pin_auth.verify_env_hash(_write_env(tmp_path)) is True
+
+    def test_returns_true_after_store_unchanged(self, tmp_path):
+        """Scenario B: hash stored, .env not modified → pass."""
+        env = _write_env(tmp_path)
+        kc: dict = {}
+        with patch("keyring.get_password", side_effect=lambda s, a: kc.get((s, a))), \
+             patch("keyring.set_password", side_effect=lambda s, a, v: kc.update({(s, a): v})):
+            pin_auth.store_env_hash(env)
+            assert pin_auth.verify_env_hash(env) is True
+
+    def test_returns_false_after_smtp_to_tampered(self, tmp_path):
+        """Scenario C: SMTP_TO changed after hash stored → tamper detected."""
+        env = _write_env(tmp_path)
+        kc: dict = {}
+        with patch("keyring.get_password", side_effect=lambda s, a: kc.get((s, a))), \
+             patch("keyring.set_password", side_effect=lambda s, a, v: kc.update({(s, a): v})):
+            pin_auth.store_env_hash(env)
+            env.write_text(env.read_text().replace("partner@example.com", "evil@hacker.com"))
+            assert pin_auth.verify_env_hash(env) is False
+
+    def test_returns_false_when_hash_deleted_but_sentinel_present(self, tmp_path):
+        """Scenario D: attacker removes env_critical_hash but sentinel remains → tamper detected."""
+        env = _write_env(tmp_path)
+        kc: dict = {}
+        with patch("keyring.get_password", side_effect=lambda s, a: kc.get((s, a))), \
+             patch("keyring.set_password", side_effect=lambda s, a, v: kc.update({(s, a): v})):
+            pin_auth.store_env_hash(env)
+            del kc[("com.vigil", "env_critical_hash")]
+            assert pin_auth.verify_env_hash(env) is False
+
+    def test_returns_true_when_both_hash_and_sentinel_deleted(self, tmp_path):
+        """Scenario E: both entries removed — indistinguishable from no install → pass (inherent limit)."""
+        with patch("keyring.get_password", return_value=None):
+            assert pin_auth.verify_env_hash(_write_env(tmp_path)) is True
+
+    def test_fails_open_when_keychain_raises(self, tmp_path):
+        """Scenario F: keychain unavailable → True (fail-open; don't block summarizer)."""
+        with patch("keyring.get_password", side_effect=Exception("keychain error")):
+            assert pin_auth.verify_env_hash(_write_env(tmp_path)) is True
+
+
+# ---------------------------------------------------------------------------
 # _cmd_delete
 # ---------------------------------------------------------------------------
 
 class TestCmdDelete:
     def test_delete_returns_0(self):
-        with patch.object(pin_auth, "_delete_hash") as mock_del:
+        with patch.object(pin_auth, "_delete_hash"), \
+             patch("keyring.delete_password"):
             assert pin_auth._cmd_delete() == 0
-        mock_del.assert_called_once()
 
     def test_delete_called_even_when_no_pin_set(self):
-        with patch.object(pin_auth, "_delete_hash") as mock_del:
+        with patch.object(pin_auth, "_delete_hash") as mock_del, \
+             patch("keyring.delete_password"):
             pin_auth._cmd_delete()
         mock_del.assert_called_once()
+
+    def test_removes_all_env_hash_keychain_entries(self):
+        """Uninstall must clear env_critical_hash, env_hash_configured, and env_original_smtp_to."""
+        deleted: list = []
+        with patch.object(pin_auth, "_delete_hash"), \
+             patch.object(pin_auth, "_delete_pin_configured_marker"), \
+             patch("keyring.delete_password", side_effect=lambda s, a: deleted.append(a)):
+            pin_auth._cmd_delete()
+        assert "env_critical_hash" in deleted
+        assert "env_hash_configured" in deleted
+        assert "env_original_smtp_to" in deleted
 
 
 # ---------------------------------------------------------------------------

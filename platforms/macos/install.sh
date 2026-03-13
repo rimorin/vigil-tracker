@@ -392,9 +392,14 @@ PYEOF
     # ── Reload running services ────────────────────────────────────────────
     _start_spinner "Reloading services..."
     RELOAD_COUNT=0
+    # Write graceful sentinel so watchdog SIGTERM handler knows this is a
+    # legitimate reload and suppresses the partner alert.
+    mkdir -p "$HOME/Library/Application Support/Vigil"
+    touch "$HOME/Library/Application Support/Vigil/watchdog_graceful_shutdown"
     for plist_dst in \
         "$LAUNCH_AGENTS_DIR/com.vigil.tracker.plist" \
-        "$LAUNCH_AGENTS_DIR/com.vigil.summarizer.plist"; do
+        "$LAUNCH_AGENTS_DIR/com.vigil.summarizer.plist" \
+        "$LAUNCH_AGENTS_DIR/com.vigil.watchdog.plist"; do
         if [[ -f "$plist_dst" ]]; then
             launchctl_unload "$plist_dst"
             launchctl_load  "$plist_dst"
@@ -502,7 +507,7 @@ info "Python $PY_VERSION ✓"
     || error "pip not available for $PYTHON_PATH. Try: $PYTHON_PATH -m ensurepip --upgrade"
 info "pip ✓"
 
-for f in com.vigil.tracker.plist com.vigil.summarizer.plist; do
+for f in com.vigil.tracker.plist com.vigil.summarizer.plist com.vigil.watchdog.plist; do
     [[ ! -f "$SCRIPT_DIR/$f" ]] && error "Required file not found: $f"
 done
 [[ ! -f "$REPO_ROOT/requirements.txt" ]] && error "Required file not found: requirements.txt"
@@ -1000,9 +1005,21 @@ SUMMARY_PLIST_DST="$LAUNCH_AGENTS_DIR/com.vigil.summarizer.plist"
 launchctl_unload "$SUMMARY_PLIST_DST"
 fill_plist "$SUMMARY_PLIST_SRC" "$SUMMARY_PLIST_DST"
 launchctl_load "$SUMMARY_PLIST_DST"
+
+# ── Install watchdog service ───────────────────────────────────────────────
+# Write graceful sentinel in case watchdog was already running (e.g. reinstall)
+# so the SIGTERM handler doesn't fire a false alarm.
+mkdir -p "$HOME/Library/Application Support/Vigil"
+touch "$HOME/Library/Application Support/Vigil/watchdog_graceful_shutdown"
+WATCHDOG_PLIST_SRC="$SCRIPT_DIR/com.vigil.watchdog.plist"
+WATCHDOG_PLIST_DST="$LAUNCH_AGENTS_DIR/com.vigil.watchdog.plist"
+launchctl_unload "$WATCHDOG_PLIST_DST"
+fill_plist "$WATCHDOG_PLIST_SRC" "$WATCHDOG_PLIST_DST"
+launchctl_load "$WATCHDOG_PLIST_DST"
 _stop_spinner
 info "Tracker service installed and started (com.vigil.tracker) ✓"
 info "Summarizer service installed (com.vigil.summarizer) — schedule: ${SUMMARY_SCHEDULE} ✓"
+info "Watchdog service installed and started (com.vigil.watchdog) ✓"
 
 # ── Send confirmation email ────────────────────────────────────────────────
 step "Sending confirmation email..."

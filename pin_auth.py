@@ -35,16 +35,25 @@ from pathlib import Path
 _ALGORITHM        = "pbkdf2_sha256"
 _ITERATIONS       = 260_000
 _MAX_ATTEMPTS     = 3
-_KEYCHAIN_SERVICE = "com.vigil"
-_KEYCHAIN_ACCOUNT = "partner_pin_hash"
+_KEYCHAIN_SERVICE              = "com.vigil"
+_KEYCHAIN_ACCOUNT              = "partner_pin_hash"
+# Sentinel written when a PIN is first set; deleted only when the PIN is
+# removed via the normal flow (which first requires the old PIN to succeed).
+# If the PIN hash disappears from the keychain but this marker remains, that
+# indicates the keychain entry was deleted outside of the normal flow.
+_KEYCHAIN_PIN_CONFIGURED_ACCOUNT = "pin_configured"
 
 # ---------------------------------------------------------------------------
 # .env integrity — constants and helpers
 # ---------------------------------------------------------------------------
 
 # Keychain accounts used by the env-integrity subsystem.
-_KEYCHAIN_ENV_HASH_ACCOUNT  = "env_critical_hash"
-_KEYCHAIN_ENV_SMTP_TO_ACCOUNT = "env_original_smtp_to"
+_KEYCHAIN_ENV_HASH_ACCOUNT        = "env_critical_hash"
+_KEYCHAIN_ENV_SMTP_TO_ACCOUNT     = "env_original_smtp_to"
+# Sentinel written when the env hash is first stored; deleted only during
+# uninstall.  If the env hash disappears from the keychain but this marker
+# remains, that indicates the entry was deleted outside the normal flow.
+_KEYCHAIN_ENV_HASH_CONFIGURED_ACCOUNT = "env_hash_configured"
 
 # The fields that the observed person must NOT be able to silently change.
 _ENV_CRITICAL_KEYS = [
@@ -85,6 +94,40 @@ def compute_env_hash(env_path: Path | None = None) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+def _set_env_hash_configured_marker() -> None:
+    """Write the 'env hash was ever stored' sentinel to the keychain."""
+    try:
+        keyring.set_password(
+            _KEYCHAIN_SERVICE, _KEYCHAIN_ENV_HASH_CONFIGURED_ACCOUNT, "1"
+        )
+    except Exception:
+        pass
+
+
+def _delete_env_hash_configured_marker() -> None:
+    """Remove the env-hash-configured sentinel (only called during uninstall)."""
+    try:
+        keyring.delete_password(
+            _KEYCHAIN_SERVICE, _KEYCHAIN_ENV_HASH_CONFIGURED_ACCOUNT
+        )
+    except keyring.errors.PasswordDeleteError:
+        pass
+    except Exception:
+        pass
+
+
+def _env_hash_was_configured() -> bool:
+    """Return True if an env hash was previously stored (sentinel present)."""
+    try:
+        return bool(
+            keyring.get_password(
+                _KEYCHAIN_SERVICE, _KEYCHAIN_ENV_HASH_CONFIGURED_ACCOUNT
+            )
+        )
+    except Exception:
+        return False
+
+
 def store_env_hash(env_path: Path | None = None) -> None:
     """Snapshot the current critical .env fields into the OS keychain.
 
@@ -94,6 +137,7 @@ def store_env_hash(env_path: Path | None = None) -> None:
     path = env_path or _ENV_FILE
     h = compute_env_hash(path)
     keyring.set_password(_KEYCHAIN_SERVICE, _KEYCHAIN_ENV_HASH_ACCOUNT, h)
+    _set_env_hash_configured_marker()
     values = _parse_env_file(path)
     smtp_to = values.get("SMTP_TO", "")
     if smtp_to:
@@ -104,13 +148,17 @@ def verify_env_hash(env_path: Path | None = None) -> bool:
     """Return True if the current .env critical fields match the stored snapshot.
 
     Returns True (not a tamper failure) when no snapshot has been stored yet.
+    If the hash entry is missing but the configured sentinel is present, the
+    hash was deleted outside the normal flow — return False to signal tampering.
     """
     try:
         stored = keyring.get_password(_KEYCHAIN_SERVICE, _KEYCHAIN_ENV_HASH_ACCOUNT) or ""
     except Exception:
         return True  # keychain unavailable — fail open
     if not stored:
-        return True  # no baseline yet
+        if _env_hash_was_configured():
+            return False  # hash deleted outside normal flow → tampered
+        return True  # no baseline ever stored — genuine first run
     return compute_env_hash(env_path or _ENV_FILE) == stored
 
 
@@ -173,6 +221,34 @@ def _delete_hash() -> None:
         pass
     except Exception:
         pass
+
+
+def _set_pin_configured_marker() -> None:
+    """Write the 'PIN was ever configured' sentinel to the keychain."""
+    try:
+        keyring.set_password(_KEYCHAIN_SERVICE, _KEYCHAIN_PIN_CONFIGURED_ACCOUNT, "1")
+    except Exception:
+        pass
+
+
+def _delete_pin_configured_marker() -> None:
+    """Remove the 'PIN configured' sentinel (only called during legitimate delete)."""
+    try:
+        keyring.delete_password(_KEYCHAIN_SERVICE, _KEYCHAIN_PIN_CONFIGURED_ACCOUNT)
+    except keyring.errors.PasswordDeleteError:
+        pass
+    except Exception:
+        pass
+
+
+def _pin_was_configured() -> bool:
+    """Return True if a PIN was previously set (sentinel present in keychain)."""
+    try:
+        return bool(
+            keyring.get_password(_KEYCHAIN_SERVICE, _KEYCHAIN_PIN_CONFIGURED_ACCOUNT)
+        )
+    except Exception:
+        return False
 
 # ---------------------------------------------------------------------------
 # Email notification
@@ -255,7 +331,34 @@ def _cmd_verify() -> int:
     """Read stored hash from the OS keychain and interactively verify the PIN."""
     stored = _get_stored_hash()
     if not stored:
-        return 0  # No PIN configured — allow uninstall without prompting.
+        if _pin_was_configured():
+            # The PIN hash is gone but the 'configured' marker remains — the
+            # keychain entry was deleted outside of the normal flow, which first
+            # requires the old PIN.  Block the operation and alert the partner.
+            _send_notification(
+                subject=f"⚠️ Vigil — PIN Removed from Keychain on {socket.gethostname()}",
+                html_body=(
+                    f"<p>The partner PIN has been removed from the OS keychain on "
+                    f"<strong>{socket.gethostname()}</strong> without going through the "
+                    f"normal Vigil uninstall command.</p>"
+                    f"<p>This may indicate a tamper attempt (e.g. the keychain entry was "
+                    f"deleted manually via the Keychain Access app or <code>security</code> "
+                    f"CLI).</p>"
+                    f"<p>PIN protection is currently disabled. Please reinstall Vigil on "
+                    f"this device and set a new partner PIN as soon as possible.</p>"
+                ),
+            )
+            print(
+                "\n  ⚠️  The partner PIN was previously set but has been removed from "
+                "the keychain\n"
+                "      outside of the normal uninstall flow.\n"
+                "      Your accountability partner has been notified.\n"
+                "      Please reinstall Vigil and set a new PIN.",
+                file=sys.stderr,
+            )
+            return 1
+        # No PIN ever configured — allow without prompting.
+        return 0
 
     print(file=sys.stderr)
     print("  🔒  A partner PIN is required to continue.", file=sys.stderr)
@@ -300,13 +403,25 @@ def _cmd_hash() -> int:
         break
 
     _store_hash(hash_pin(pin))
+    _set_pin_configured_marker()
     print("  🔐  Partner PIN stored in OS keychain.", file=sys.stderr)
     return 0
 
 
 def _cmd_delete() -> int:
-    """Remove the stored hash from the OS keychain."""
+    """Remove the stored PIN hash and env-integrity entries from the OS keychain."""
     _delete_hash()
+    _delete_pin_configured_marker()
+    # Clean up env-integrity entries so they don't ghost after uninstall.
+    try:
+        keyring.delete_password(_KEYCHAIN_SERVICE, _KEYCHAIN_ENV_HASH_ACCOUNT)
+    except Exception:
+        pass
+    _delete_env_hash_configured_marker()
+    try:
+        keyring.delete_password(_KEYCHAIN_SERVICE, _KEYCHAIN_ENV_SMTP_TO_ACCOUNT)
+    except Exception:
+        pass
     return 0
 
 

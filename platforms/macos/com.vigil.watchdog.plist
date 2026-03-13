@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.vigil.watchdog</string>
+
+    <key>ServiceDescription</key>
+    <string>Vigil Watchdog</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON_PATH__</string>
+        <string>__PROJECT_DIR__/watchdog.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__PROJECT_DIR__</string>
+
+    <!-- Always restart if the watchdog exits (including clean exit). -->
+    <!-- KeepAlive=true so an attacker cannot permanently stop it without launchctl bootout. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- ExitTimeout: launchd waits this many seconds after SIGTERM before sending SIGKILL. -->
+    <!-- 30 s gives the SIGTERM handler enough time to send the partner alert email (15 s SMTP timeout). -->
+    <key>ExitTimeout</key>
+    <integer>30</integer>
+
+    <key>StandardOutPath</key>
+    <string>/dev/null</string>
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/watchdog_stderr.log</string>
+</dict>
+</plist>

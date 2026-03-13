@@ -8,6 +8,7 @@ never invoked.
 
 import hashlib
 import re
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -375,3 +376,165 @@ class TestVerifyLogIntegrity:
     def test_returns_true_when_neither_file_exists(self, log_env):
         # Both files absent → no comparison possible → considered valid
         assert summarizer._verify_log_integrity() is True
+
+    def test_returns_false_when_log_deleted_but_hash_present(self, log_env):
+        """Hash sidecar exists (baseline established) but log was deleted → tampered."""
+        log, integrity = log_env
+        integrity.write_text(hashlib.sha256(b"original content\n").hexdigest())
+        # log file is intentionally NOT created — simulates attacker deleting the log
+
+        assert summarizer._verify_log_integrity() is False
+
+
+# ---------------------------------------------------------------------------
+# _check_watchdog_heartbeat  (SIGKILL heartbeat defence)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def heartbeat_env(tmp_path, monkeypatch):
+    """Patch WATCHDOG_HEARTBEAT_FILE to a temp path."""
+    hb = tmp_path / "watchdog_heartbeat"
+    monkeypatch.setattr(summarizer, "WATCHDOG_HEARTBEAT_FILE", hb)
+    return hb
+
+
+class TestCheckWatchdogHeartbeat:
+    """_check_watchdog_heartbeat alerts when the watchdog heartbeat goes stale."""
+
+    def test_no_alert_when_heartbeat_file_absent(self, heartbeat_env):
+        """No heartbeat file → watchdog may not be installed; skip silently."""
+        with patch.object(summarizer, "_send_alert_email") as mock_alert:
+            summarizer._check_watchdog_heartbeat()
+        mock_alert.assert_not_called()
+
+    def test_no_alert_when_heartbeat_is_fresh(self, heartbeat_env):
+        """Heartbeat written just now → no alert."""
+        heartbeat_env.write_text(str(time.time()))
+        with patch.object(summarizer, "_send_alert_email") as mock_alert:
+            summarizer._check_watchdog_heartbeat()
+        mock_alert.assert_not_called()
+
+    def test_no_alert_just_within_threshold(self, heartbeat_env):
+        """Heartbeat at exactly the threshold boundary is still considered fresh."""
+        just_within = time.time() - summarizer._WATCHDOG_HEARTBEAT_STALE_SECS + 1
+        heartbeat_env.write_text(str(just_within))
+        with patch.object(summarizer, "_send_alert_email") as mock_alert:
+            summarizer._check_watchdog_heartbeat()
+        mock_alert.assert_not_called()
+
+    def test_alerts_when_heartbeat_stale(self, heartbeat_env):
+        """Heartbeat older than threshold → partner alert sent."""
+        stale_time = time.time() - summarizer._WATCHDOG_HEARTBEAT_STALE_SECS - 10
+        heartbeat_env.write_text(str(stale_time))
+        with patch.object(summarizer, "_send_alert_email") as mock_alert:
+            summarizer._check_watchdog_heartbeat()
+        mock_alert.assert_called_once()
+        subject = mock_alert.call_args.kwargs["subject"]
+        assert "Watchdog" in subject
+        assert "Heartbeat" in subject or "heartbeat" in subject.lower()
+
+    def test_alert_subject_mentions_stale_heartbeat(self, heartbeat_env):
+        """Alert subject clearly identifies the stale heartbeat condition."""
+        stale_time = time.time() - summarizer._WATCHDOG_HEARTBEAT_STALE_SECS - 30
+        heartbeat_env.write_text(str(stale_time))
+        with patch.object(summarizer, "_send_alert_email") as mock_alert:
+            summarizer._check_watchdog_heartbeat()
+        subject = mock_alert.call_args.kwargs["subject"]
+        assert "Stale" in subject or "stale" in subject.lower()
+
+    def test_no_alert_when_heartbeat_file_malformed(self, heartbeat_env):
+        """Malformed heartbeat file (not a float) → skip silently, no crash."""
+        heartbeat_env.write_text("not-a-timestamp")
+        with patch.object(summarizer, "_send_alert_email") as mock_alert:
+            summarizer._check_watchdog_heartbeat()  # must not raise
+        mock_alert.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Gap 1a: watchdog heartbeat file deletion detected by summarizer
+# ---------------------------------------------------------------------------
+
+class TestCheckWatchdogHeartbeatDeletion:
+    """Summarizer alerts when the watchdog heartbeat file is deleted after first-seen."""
+
+    def test_no_alert_when_file_absent_and_never_seen(self, heartbeat_env, monkeypatch):
+        """File absent before first-seen → silent (not yet installed)."""
+        monkeypatch.setattr(summarizer, "_watchdog_heartbeat_ever_seen", False)
+        with patch.object(summarizer, "_send_alert_email") as mock_alert:
+            summarizer._check_watchdog_heartbeat()
+        mock_alert.assert_not_called()
+
+    def test_alerts_when_file_deleted_after_being_seen(self, heartbeat_env, monkeypatch):
+        """File was present, then deleted → alert for tamper attempt."""
+        heartbeat_env.write_text(str(time.time()))
+        monkeypatch.setattr(summarizer, "_watchdog_heartbeat_ever_seen", False)
+        with patch.object(summarizer, "_send_alert_email"):
+            summarizer._check_watchdog_heartbeat()  # primes _ever_seen = True
+        heartbeat_env.unlink()
+        with patch.object(summarizer, "_send_alert_email") as mock_alert:
+            summarizer._check_watchdog_heartbeat()
+        mock_alert.assert_called_once()
+        subject = mock_alert.call_args.kwargs["subject"]
+        assert "Deleted" in subject or "deleted" in subject.lower()
+        assert "Watchdog" in subject or "Heartbeat" in subject
+
+    def test_deletion_alert_body_mentions_tamper(self, heartbeat_env, monkeypatch):
+        """Alert body should mention tamper/deliberate deletion."""
+        heartbeat_env.write_text(str(time.time()))
+        monkeypatch.setattr(summarizer, "_watchdog_heartbeat_ever_seen", False)
+        with patch.object(summarizer, "_send_alert_email"):
+            summarizer._check_watchdog_heartbeat()
+        heartbeat_env.unlink()
+        with patch.object(summarizer, "_send_alert_email") as mock_alert:
+            summarizer._check_watchdog_heartbeat()
+        body = mock_alert.call_args.kwargs["plain_text"]
+        assert "tamper" in body.lower() or "deliberate" in body.lower()
+
+
+# ---------------------------------------------------------------------------
+# _write_summarizer_heartbeat: summarizer writes its own heartbeat
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def summarizer_hb_env(tmp_path, monkeypatch):
+    """Patch SUMMARIZER_HEARTBEAT_FILE to a temp path."""
+    hb = tmp_path / "summarizer_heartbeat"
+    monkeypatch.setattr(summarizer, "SUMMARIZER_HEARTBEAT_FILE", hb)
+    return hb
+
+
+class TestWriteSummarizerHeartbeat:
+    """_write_summarizer_heartbeat writes a fresh timestamp to SUMMARIZER_HEARTBEAT_FILE."""
+
+    def test_creates_heartbeat_file(self, summarizer_hb_env):
+        """File is created when it does not exist."""
+        summarizer._write_summarizer_heartbeat()
+        assert summarizer_hb_env.exists()
+
+    def test_written_value_is_a_float(self, summarizer_hb_env):
+        """Written content is a valid floating-point Unix timestamp."""
+        summarizer._write_summarizer_heartbeat()
+        val = float(summarizer_hb_env.read_text().strip())
+        assert val > 0
+
+    def test_written_value_is_recent(self, summarizer_hb_env):
+        """Timestamp is within 1 second of time.time()."""
+        before = time.time()
+        summarizer._write_summarizer_heartbeat()
+        after = time.time()
+        val = float(summarizer_hb_env.read_text().strip())
+        assert before <= val <= after
+
+    def test_overwrites_stale_value(self, summarizer_hb_env):
+        """Calling the function twice updates the file with a newer timestamp."""
+        summarizer_hb_env.write_text(str(time.time() - 120))
+        first = float(summarizer_hb_env.read_text())
+        summarizer._write_summarizer_heartbeat()
+        second = float(summarizer_hb_env.read_text())
+        assert second > first
+
+    def test_no_exception_on_write_failure(self, tmp_path, monkeypatch):
+        """A write failure (e.g., read-only dir) is swallowed — must not crash."""
+        import summarizer as _s
+        monkeypatch.setattr(_s, "SUMMARIZER_HEARTBEAT_FILE", Path("/nonexistent_dir/hb"))
+        _s._write_summarizer_heartbeat()  # must not raise

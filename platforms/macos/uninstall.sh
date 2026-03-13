@@ -94,6 +94,18 @@ else
     warn "Skipping uninstall notification (.env not found or python unavailable)."
 fi
 
+# ── Stop watchdog first (gracefully, so SIGTERM handler doesn't alert) ────
+WATCHDOG_PLIST="$LAUNCH_AGENTS_DIR/com.vigil.watchdog.plist"
+mkdir -p "$HOME/Library/Application Support/Vigil"
+touch "$HOME/Library/Application Support/Vigil/watchdog_graceful_shutdown"
+if [[ -f "$WATCHDOG_PLIST" ]]; then
+    launchctl_unload "$WATCHDOG_PLIST" && info "Stopped com.vigil.watchdog." || warn "com.vigil.watchdog was not loaded."
+    rm -f "$WATCHDOG_PLIST"
+    info "Removed $WATCHDOG_PLIST"
+else
+    warn "com.vigil.watchdog.plist not found in LaunchAgents — already removed?"
+fi
+
 # ── Stop and remove tracker service ───────────────────────────────────────
 WEB_PLIST="$LAUNCH_AGENTS_DIR/com.vigil.tracker.plist"
 if [[ -f "$WEB_PLIST" ]]; then

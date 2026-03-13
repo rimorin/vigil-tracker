@@ -35,7 +35,7 @@ $ErrorActionPreference = 'Stop'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot  = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 $EnvFile   = Join-Path $RepoRoot ".env"
-$TaskNames = @("Vigil Tracker", "Vigil Summarizer")
+$TaskNames = @("Vigil Watchdog", "Vigil Tracker", "Vigil Summarizer")
 
 function Write-OK   { param($msg) Write-Host "  [OK] $msg" -ForegroundColor Green }
 function Write-Warn { param($msg) Write-Host "  [!]  $msg" -ForegroundColor Yellow }
@@ -145,6 +145,13 @@ if (Test-Path $EnvFile) {
 
 Write-Host ""
 
+# -- Write graceful sentinel before stopping services -----------------------
+# Prevents the watchdog SIGTERM handler from firing a false tamper alert
+# during a legitimate uninstall.
+$AppDataVigilDir = Join-Path $env:APPDATA "Vigil"
+New-Item -ItemType Directory -Force -Path $AppDataVigilDir | Out-Null
+New-Item -ItemType File -Force -Path (Join-Path $AppDataVigilDir "watchdog_graceful_shutdown") | Out-Null
+
 # -- Stop and unregister tasks -----------------------------------------------
 foreach ($name in $TaskNames) {
     $task = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
@@ -162,7 +169,7 @@ foreach ($exe in @("python.exe", "pythonw.exe")) {
     Get-CimInstance Win32_Process -Filter "Name='$exe'" -ErrorAction SilentlyContinue |
         ForEach-Object {
             $cl = $_.CommandLine
-            if ($cl -like "*tracker.py*" -or $cl -like "*summarizer.py*") {
+            if ($cl -like "*tracker.py*" -or $cl -like "*summarizer.py*" -or $cl -like "*watchdog.py*") {
                 Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
                 Write-Warn "Killed lingering process: $exe (PID $($_.ProcessId))"
             }

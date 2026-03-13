@@ -19,6 +19,7 @@ Vigil runs quietly in the background on your computer. It watches which websites
 - [Installation](#-installation)
 - [Settings Reference](#️-settings-reference)
 - [Partner PIN Protection](#-partner-pin-protection)
+- [Tamper Protection](#-tamper-protection)
 - [Updating the Domain Blocklist](#-updating-the-domain-blocklist)
 - [How Alert Detection Works](#-how-alert-detection-works)
 - [Log Files](#-log-files)
@@ -83,9 +84,9 @@ Vigil applies this practically: your partner sees exactly what you see, on the s
 - 📧 **Email via your own account** — standard SMTP. Gmail, Outlook, iCloud, Fastmail — any provider works.
 - ⏰ **Flexible schedule** — hourly, daily, weekly, monthly, or custom interval.
 - 🚀 **Always running** — starts on login, restarts on crash via macOS launchd or Windows Task Scheduler.
-- 🛡️ **Tamper detection** — if the log file is edited, an alert is sent before the next digest.
-- 👁️ **Watchdog** — if the tracker stops unexpectedly, an alert goes out immediately.
-- 🔑 **Partner PIN protection** — your partner sets a PIN at install time that only they know. Without it, Vigil cannot be uninstalled. See [Partner PIN Protection](#-partner-pin-protection).
+- 🛡️ **Tamper detection** — if the log file is edited, an alert is sent before the next digest. If the `.env` config file is deleted, the watchdog fires an alert using credentials cached at startup before credentials are lost.
+- 👁️ **Watchdog** — an independent third daemon monitors the tracker and summarizer. If either service stops unexpectedly (including via `kill -9`), your partner is notified immediately. Each daemon writes a heartbeat file every ~60 seconds; the other reads it — so even a forcible kill is detected within minutes.
+- 🔑 **Partner PIN protection** — your partner sets a PIN at install time that only they know. Without it, Vigil cannot be uninstalled, reinstalled, or reconfigured. See [Partner PIN Protection](#-partner-pin-protection).
 - 🔐 **Private** — only domain names (e.g. `youtube.com`) are ever sent to OpenAI. Full URLs stay on your machine.
 
 ---
@@ -104,7 +105,7 @@ Vigil applies this practically: your partner sees exactly what you see, on the s
 | Comet (Perplexity) | ✅ | ✅ |
 | Opera | ✅ | ✅ |
 | Vivaldi | ✅ | ✅ |
-| Firefox | ❌ Not supported | ❌ | [See note below](#firefox-note) |
+| Firefox | ❌ Not supported | ❌ |
 
 ### Windows
 
@@ -229,7 +230,7 @@ Vigil sends email through your own existing email account using SMTP — no thir
 
 > **Tip:** Put both your address and your partner's in `SMTP_TO` (comma-separated). Both receive every digest and every alert. You can use a spare account as the sender.
 
-> **If emails stop arriving after install**, run `bash platforms/macos/install.sh --update` (macOS) or `platforms\windows\install.bat -Update` (Windows) to re-enter your SMTP credentials.
+> **If emails stop arriving after install**, run `vigil update` to re-enter your SMTP credentials. If the `vigil` command isn't available, run `bash platforms/macos/install.sh --update` (macOS) or `platforms\windows\install.bat -Update` (Windows) directly.
 
 ---
 
@@ -267,7 +268,7 @@ Once installed, everything is managed through the `vigil` command:
 3. Validates your OpenAI key (if provided)
 4. Installs Python packages
 5. Invites your partner to set a PIN (stored securely in the OS keychain — only they should know it)
-6. Registers both background services (auto-restart on crash, auto-start on login)
+6. Registers all three background services (auto-restart on crash, auto-start on login)
 7. Sends a confirmation email — if delivery fails, shows your SMTP settings and the exact command to fix them
 
 ---
@@ -325,7 +326,7 @@ SUMMARY_SCHEDULE_HOUR=9
 
 People remove accountability tools in moments of weakness. The partner PIN prevents that.
 
-> **You should not know your own PIN.** Your partner sets it at install time and keeps it. Without it, Vigil cannot be uninstalled — turning an impulsive decision into a conversation.
+> **You should not know your own PIN.** Your partner sets it at install time and keeps it. Without it, Vigil cannot be uninstalled, reinstalled, or reconfigured — turning an impulsive decision into a conversation.
 
 - PIN is hashed with PBKDF2-HMAC-SHA256 — never stored in plain text
 - Stored in the OS keychain (macOS Keychain / Windows Credential Locker)
@@ -339,6 +340,69 @@ python pin_auth.py verify  # verify PIN
 python pin_auth.py delete  # remove PIN — partner only
 python pin_auth.py status  # check if PIN is set
 ```
+
+**Which commands require the PIN:**
+
+| Command | PIN required when set |
+|---|---|
+| `vigil uninstall` | ✅ Always |
+| `vigil reinstall` | ✅ |
+| `vigil update` | ✅ |
+| `vigil setup` | ✅ |
+| `vigil status` / `vigil doctor` | ❌ Read-only; no PIN needed |
+
+> **Why setup and update are gated:** without this, the observed person could run `vigil update` to swap in a different SMTP address and quietly redirect all alerts away from their partner.
+
+---
+
+## 🛡️ Tamper Protection
+
+Vigil is designed so the person being monitored cannot disable it without their partner knowing. Below is a summary of every protection layer.
+
+### Service-stop detection
+
+An independent **watchdog** daemon (`watchdog.py`) runs alongside the tracker and summarizer. It is separate from both so killing one service cannot silence the watchdog.
+
+| Attack | How it's caught |
+|---|---|
+| `launchctl unload` / Stop-ScheduledTask (SIGTERM) | Watchdog `_shutdown_handler` fires before exit; sends alert |
+| `kill -9` on tracker or summarizer (SIGKILL) | Watchdog writes a heartbeat every ~60 s; each daemon monitors the other's heartbeat — staleness ≥ 2.5 min → alert |
+| `kill -9` on watchdog only | Summarizer reads watchdog heartbeat and alerts when it goes stale |
+| `kill -9` on summarizer only | Watchdog reads summarizer heartbeat and alerts when it goes stale |
+| Deleting a heartbeat file to bypass staleness detection | Watchdog and summarizer track "ever seen" per file; deletion after first-seen triggers an immediate alert |
+
+### Credential-tampering detection
+
+| Attack | How it's caught |
+|---|---|
+| Edit `.env` to redirect `SMTP_TO` to a different address | `SMTP_TO` is stored in the OS keychain at install time and read from there — `.env` value is ignored for alert routing |
+| Delete `.env` to silence all future alerts | Watchdog caches SMTP credentials in memory at startup; uses the cache if `.env` disappears; fires an alert about the deletion while credentials are still warm |
+
+### Log-tampering detection
+
+| Attack | How it's caught |
+|---|---|
+| Edit `detailed_activity_log.txt` to remove flagged visits | SHA-256 hash stored alongside the log; any change is detected before the next digest and triggers a tamper alert |
+
+### Reinstall / reconfiguration gating
+
+| Attack | How it's caught |
+|---|---|
+| `vigil reinstall` to re-register services with altered config | PIN required |
+| `vigil update` to change SMTP credentials | PIN required |
+| `vigil setup` to run the install wizard again | PIN required |
+| `vigil uninstall` | PIN required |
+
+### What is **not** fully covered
+
+Vigil is a strong deterrent for casual and moderate technical attackers. A determined attacker with sustained shell access — who knows the codebase — can still:
+
+- Kill **watchdog and summarizer simultaneously** — the tracker keeps running but neither daemon survives to check the other's heartbeat. The accountability partner would notice the email stream going silent.
+- Kill **all three** daemons simultaneously via SIGKILL (within the ~60 s heartbeat window) — no daemon survives to alert. Same mitigation: partner notices silence.
+- Wipe the whole `vigil-tracker/` folder (removes both code and `.env`)
+- Reinstall with a fresh `.env` pointing to a different address (the PIN gate prevents this once a PIN has been set)
+
+For maximum protection, pair Vigil with an MDM profile, user account restrictions, or a separate device your partner controls.
 
 ---
 
@@ -457,8 +521,10 @@ ALERT_SCAN_INTERVAL_MINUTES=10  # less frequent; fine for most use cases
 |---|---|
 | `tracker_daemon.log` | Tracker start/stop events and polled URLs |
 | `tracker_stderr.log` | Tracker errors |
-| `summarizer_daemon.log` | Digest sends, API calls, watchdog checks |
+| `summarizer_daemon.log` | Digest sends, API calls, watchdog-heartbeat checks |
 | `summarizer_stderr.log` | Summariser errors |
+| `watchdog_daemon.log` | Watchdog tamper-alert events and heartbeat checks |
+| `watchdog_stderr.log` | Watchdog errors |
 | `alerter.log` | Adult-site detections and alert email results (check here if alerts aren't arriving) |
 | `detailed_activity_log.txt` | Full browsing log with timestamps |
 | `detailed_activity_log.txt.sha256` | Tamper-detection hash |
@@ -494,7 +560,8 @@ The uninstaller will stop all services, optionally delete log files and settings
 ```
 vigil-tracker/
 ├── tracker.py                  # Watches browser tabs every few seconds
-├── summarizer.py               # Sends scheduled digest emails
+├── summarizer.py               # Sends scheduled digest emails; monitors watchdog heartbeat
+├── watchdog.py                 # Independent watchdog: monitors tracker + summarizer; SIGTERM/SIGKILL alerting
 ├── alerter.py                  # Sends instant alerts for porn sites
 ├── pin_auth.py                 # Partner PIN hashing and OS keychain storage
 ├── config.py                   # Reads settings from .env
@@ -514,7 +581,8 @@ vigil-tracker/
 │       ├── install.sh          # macOS one-command setup
 │       ├── uninstall.sh        # macOS one-command removal
 │       ├── com.vigil.tracker.plist    # launchd config (tracker)
-│       └── com.vigil.summarizer.plist # launchd config (summarizer)
+│       ├── com.vigil.summarizer.plist # launchd config (summarizer)
+│       └── com.vigil.watchdog.plist   # launchd config (watchdog)
 ├── .env.template               # Settings template — copy to .env and fill in
 ├── data/
 │   └── domains.txt             # Offline blocklist for instant alerts
@@ -524,6 +592,7 @@ vigil-tracker/
     ├── test_summarizer.py
     ├── test_alerter.py
     ├── test_pin_auth.py
+    ├── test_watchdog.py
     └── test_windows.py
 ```
 
@@ -546,9 +615,10 @@ No real browsing data, email accounts, or OpenAI calls are used — everything r
 | File | What is tested |
 |---|---|
 | `test_tracker.py` | Log writing, timestamps, hash updates, session detection, `[FLAGGED_CONTENT]` tagging, shutdown events |
-| `test_summarizer.py` | Log cleanup, domain parsing, time totals, email formatting, tamper detection |
+| `test_summarizer.py` | Log cleanup, domain parsing, time totals, email formatting, tamper detection, watchdog heartbeat monitoring |
 | `test_alerter.py` | Adult-domain detection, `[FLAGGED_CONTENT]` log tagging, cursor-based log scanning, consolidated alert email |
 | `test_pin_auth.py` | PIN hashing, PBKDF2 verification, keychain storage/retrieval/deletion, failed-attempt lockout and alert email |
+| `test_watchdog.py` | Service-stop alerting, SIGTERM handler, startup grace period, SIGKILL heartbeat detection, heartbeat file deletion detection, `.env` deletion detection, SMTP cache fallback, PIN gate on reinstall/setup/update |
 | `test_windows.py` | Windows idle detection, UIA URL reading, active-window label (fully mocked) |
 
 ---

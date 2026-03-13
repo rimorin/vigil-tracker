@@ -71,6 +71,7 @@ $LogDir      = Join-Path $env:LOCALAPPDATA "Vigil\Logs"
 $Tasks = @(
     @{ Name = "Vigil Tracker";    Script = "tracker.py";    DaemonLog = "tracker_daemon.log";    StderrLog = "tracker_stderr.log"    }
     @{ Name = "Vigil Summarizer"; Script = "summarizer.py"; DaemonLog = "summarizer_daemon.log"; StderrLog = "summarizer_stderr.log" }
+    @{ Name = "Vigil Watchdog";   Script = "watchdog.py";   DaemonLog = "watchdog_daemon.log";   StderrLog = "watchdog_stderr.log"   }
 )
 
 function Write-Step  { param($msg) Write-Host "`n  $msg" -ForegroundColor Cyan }
@@ -407,6 +408,11 @@ if ($Update) {
     # Restart running services so they pick up the new .env
     Start-Spinner "Restarting services..."
     $reloadCount = 0
+    # Write graceful sentinel so the watchdog SIGTERM handler knows this is a
+    # legitimate restart and suppresses the partner alert.
+    $AppDataVigilDir = Join-Path $env:APPDATA "Vigil"
+    New-Item -ItemType Directory -Force -Path $AppDataVigilDir | Out-Null
+    New-Item -ItemType File -Force -Path (Join-Path $AppDataVigilDir "watchdog_graceful_shutdown") | Out-Null
     foreach ($t in $Tasks) {
         $task = Get-ScheduledTask -TaskName $t.Name -ErrorAction SilentlyContinue
         if ($null -ne $task) {

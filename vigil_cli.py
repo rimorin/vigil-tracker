@@ -149,7 +149,29 @@ def _unsupported() -> None:
 
 # ── subcommands ───────────────────────────────────────────────────────────────
 
+def _gate_with_pin() -> None:
+    """If a PIN has been configured, require it before modifying the install.
+
+    Exits with code 1 if the user fails/cancels the PIN prompt.  This prevents
+    the observed person from running ``vigil setup``, ``vigil reinstall``, or
+    ``vigil update`` to swap out credentials or re-register services without the
+    accountability partner's knowledge.
+    """
+    try:
+        sys.path.insert(0, str(REPO_ROOT))
+        import pin_auth  # type: ignore[import]
+        if pin_auth._pin_was_configured():
+            result = pin_auth._cmd_verify()
+            if result != 0:
+                sys.exit(1)
+    except SystemExit:
+        raise
+    except Exception:
+        pass  # if pin_auth unavailable (e.g. clean checkout), allow through
+
+
 def cmd_setup(_args: argparse.Namespace) -> None:
+    _gate_with_pin()
     if sys.platform == "darwin":
         _macos()
     elif sys.platform == "win32":
@@ -169,6 +191,7 @@ def cmd_status(_args: argparse.Namespace) -> None:
 
 
 def cmd_update(_args: argparse.Namespace) -> None:
+    _gate_with_pin()
     if sys.platform == "darwin":
         _macos("--update")
     elif sys.platform == "win32":
@@ -187,6 +210,7 @@ def cmd_blocklist(_args: argparse.Namespace) -> None:
 
 
 def cmd_reinstall(_args: argparse.Namespace) -> None:
+    _gate_with_pin()
     if sys.platform == "darwin":
         _macos("--reinstall")
     elif sys.platform == "win32":
@@ -389,14 +413,14 @@ def cmd_doctor(_args: argparse.Namespace) -> None:
     # ── 5. Services ───────────────────────────────────────────────────────────
     _section("Services")
     if sys.platform == "darwin":
-        for label in ("com.vigil.tracker", "com.vigil.summarizer"):
+        for label in ("com.vigil.tracker", "com.vigil.summarizer", "com.vigil.watchdog"):
             running, detail = _launchd_status(label)
             if running:
                 ok(label, detail)
             else:
                 fail(label, f"{detail} — run: vigil reinstall")
     elif sys.platform == "win32":
-        for task in ("Vigil Tracker", "Vigil Summarizer"):
+        for task in ("Vigil Tracker", "Vigil Summarizer", "Vigil Watchdog"):
             running, detail = _schtasks_status(task)
             if running:
                 ok(task, detail)
