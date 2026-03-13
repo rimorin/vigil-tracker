@@ -7,10 +7,12 @@ store (macOS Keychain on macOS, Windows Credential Locker on Windows) via the
 `keyring` library — not in a plain-text file the user can easily edit.
 
 CLI usage (called by install / uninstall scripts):
-    python pin_auth.py hash    — prompt for a new PIN, store hash in OS keychain
-    python pin_auth.py verify  — prompt for PIN, verify against keychain, exit 0/1
-    python pin_auth.py delete  — remove stored hash from OS keychain
-    python pin_auth.py status  — exit 0 if a PIN is stored, 1 if not
+    python pin_auth.py hash       — prompt for a new PIN, store hash in OS keychain
+    python pin_auth.py verify     — prompt for PIN, verify against keychain, exit 0/1
+    python pin_auth.py delete     — remove stored hash from OS keychain
+    python pin_auth.py status     — exit 0 if a PIN is stored, 1 if not
+    python pin_auth.py env_store  — snapshot critical .env fields into keychain
+    python pin_auth.py env_verify — exit 0 if .env matches snapshot, 1 if tampered
 """
 
 import getpass
@@ -35,6 +37,92 @@ _ITERATIONS       = 260_000
 _MAX_ATTEMPTS     = 3
 _KEYCHAIN_SERVICE = "com.vigil"
 _KEYCHAIN_ACCOUNT = "partner_pin_hash"
+
+# ---------------------------------------------------------------------------
+# .env integrity — constants and helpers
+# ---------------------------------------------------------------------------
+
+# Keychain accounts used by the env-integrity subsystem.
+_KEYCHAIN_ENV_HASH_ACCOUNT  = "env_critical_hash"
+_KEYCHAIN_ENV_SMTP_TO_ACCOUNT = "env_original_smtp_to"
+
+# The fields that the observed person must NOT be able to silently change.
+_ENV_CRITICAL_KEYS = [
+    "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS",
+    "SMTP_TO", "ALERT_ENABLED",
+]
+
+# Resolved at import time — callers can override if needed.
+_ENV_FILE = Path(__file__).parent / ".env"
+
+
+def _parse_env_file(env_path: Path) -> dict:
+    """Return a key→value dict parsed from *env_path* (no shell expansion)."""
+    result: dict = {}
+    if not env_path.exists():
+        return result
+    for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        result[k.strip()] = v.strip().strip('"').strip("'")
+    return result
+
+
+def compute_env_hash(env_path: Path | None = None) -> str:
+    """Return a SHA-256 hex digest of the critical .env fields.
+
+    Uses a deterministic canonical form so the hash is independent of field
+    order in the file.
+    """
+    path = env_path or _ENV_FILE
+    values = _parse_env_file(path)
+    canonical = "|".join(
+        f"{k}={values.get(k, '')}"
+        for k in sorted(_ENV_CRITICAL_KEYS)
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def store_env_hash(env_path: Path | None = None) -> None:
+    """Snapshot the current critical .env fields into the OS keychain.
+
+    Also stores SMTP_TO separately so the summariser can alert the *original*
+    partner even if that address is later tampered with.
+    """
+    path = env_path or _ENV_FILE
+    h = compute_env_hash(path)
+    keyring.set_password(_KEYCHAIN_SERVICE, _KEYCHAIN_ENV_HASH_ACCOUNT, h)
+    values = _parse_env_file(path)
+    smtp_to = values.get("SMTP_TO", "")
+    if smtp_to:
+        keyring.set_password(_KEYCHAIN_SERVICE, _KEYCHAIN_ENV_SMTP_TO_ACCOUNT, smtp_to)
+
+
+def verify_env_hash(env_path: Path | None = None) -> bool:
+    """Return True if the current .env critical fields match the stored snapshot.
+
+    Returns True (not a tamper failure) when no snapshot has been stored yet.
+    """
+    try:
+        stored = keyring.get_password(_KEYCHAIN_SERVICE, _KEYCHAIN_ENV_HASH_ACCOUNT) or ""
+    except Exception:
+        return True  # keychain unavailable — fail open
+    if not stored:
+        return True  # no baseline yet
+    return compute_env_hash(env_path or _ENV_FILE) == stored
+
+
+def get_original_smtp_to() -> str:
+    """Return the original SMTP_TO stored at install/update time.
+
+    Falls back to '' if the keychain entry is missing.
+    """
+    try:
+        return keyring.get_password(_KEYCHAIN_SERVICE, _KEYCHAIN_ENV_SMTP_TO_ACCOUNT) or ""
+    except Exception:
+        return ""
 
 # ---------------------------------------------------------------------------
 # Hashing / verification
@@ -227,6 +315,26 @@ def _cmd_status() -> int:
     return 0 if _get_stored_hash() else 1
 
 
+def _cmd_env_store() -> int:
+    """Snapshot critical .env fields into the OS keychain."""
+    try:
+        store_env_hash()
+        print("  🔐  .env integrity snapshot stored in OS keychain.", file=sys.stderr)
+        return 0
+    except Exception as exc:
+        print(f"  ⚠️  Could not store .env snapshot: {exc}", file=sys.stderr)
+        return 1
+
+
+def _cmd_env_verify() -> int:
+    """Exit 0 if .env critical fields match the stored snapshot, 1 if tampered."""
+    if verify_env_hash():
+        return 0
+    print("  ⚠️  .env integrity check failed — configuration may have been tampered.",
+          file=sys.stderr)
+    return 1
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
 
@@ -238,9 +346,13 @@ if __name__ == "__main__":
         sys.exit(_cmd_delete())
     elif cmd == "status":
         sys.exit(_cmd_status())
+    elif cmd == "env_store":
+        sys.exit(_cmd_env_store())
+    elif cmd == "env_verify":
+        sys.exit(_cmd_env_verify())
     else:
         print(
-            f"Usage: python {Path(__file__).name} verify | hash | delete | status",
+            f"Usage: python {Path(__file__).name} verify | hash | delete | status | env_store | env_verify",
             file=sys.stderr,
         )
         sys.exit(2)

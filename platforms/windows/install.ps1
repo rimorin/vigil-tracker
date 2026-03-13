@@ -291,6 +291,17 @@ if ($Update) {
         exit 1
     }
 
+    # -- Partner PIN verification (required before any settings can change) --
+    & $pythonExe "$RepoRoot\pin_auth.py" "status" 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  🔒  A partner PIN is required to update settings." -ForegroundColor Cyan
+        & $pythonExe "$RepoRoot\pin_auth.py" "verify"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  Update aborted - PIN verification failed." -ForegroundColor Red
+            exit 1
+        }
+    }
+
     Write-Host "  Press Enter to keep the value shown in [brackets]."
     Write-Host ""
 
@@ -422,6 +433,8 @@ if ($Update) {
         Write-Warn "No installed services found - run .\install.ps1 to install."
     }
     Write-Host ""
+    # Snapshot the (now-updated) .env so the summariser can detect future tampering.
+    & $pythonExe "$RepoRoot\pin_auth.py" "env_store" 2>$null
     exit 0
 }
 
@@ -577,6 +590,19 @@ ALERT_EMAIL=true
 }
 
 # -- Setup wizard (skipped on -Reinstall) --------------------------------------
+if ($Reinstall) {
+    # Require PIN before a reinstall so that a user can't reload modified plists
+    # without the partner's knowledge.
+    & $pythonExe "$RepoRoot\pin_auth.py" "status" 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  🔒  A partner PIN is required to reinstall." -ForegroundColor Cyan
+        & $pythonExe "$RepoRoot\pin_auth.py" "verify"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  Reinstall aborted - PIN verification failed." -ForegroundColor Red
+            exit 1
+        }
+    }
+}
 if (-not $Reinstall) {
     Write-Step "Checking configuration"
 
@@ -988,6 +1014,10 @@ if ($confirmExit -eq 0) {
     Write-Host "  (re-enter your SMTP credentials)"
     Write-Host ""
 }
+
+# -- Snapshot .env integrity baseline -----------------------------------------
+# Stored in the OS keychain so the summariser can detect silent .env edits.
+& $pythonExe "$RepoRoot\pin_auth.py" "env_store" 2>$null
 
 # -- Summary ------------------------------------------------------------------
 Write-Host ""

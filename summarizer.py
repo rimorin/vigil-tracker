@@ -25,6 +25,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from logging.handlers import RotatingFileHandler
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from socket import gethostname
 from typing import List, Optional, Tuple
 
@@ -319,12 +320,14 @@ def _html_to_text(html: str) -> str:
 _SMTP_WALL_TIMEOUT = 60  # seconds — hard limit for the entire SMTP transaction
 
 
-def _do_send_smtp(subject: str, html_body: str, plain_text: str) -> None:
+def _do_send_smtp(subject: str, html_body: str, plain_text: str,
+                  override_to: Optional[List[str]] = None) -> None:
     """Low-level SMTP send. Called inside a thread with a wall-clock timeout."""
+    recipients = override_to if override_to else config.SMTP_TO
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = f"Vigil <{config.SMTP_FROM}>"
-    msg["To"] = ", ".join(config.SMTP_TO)
+    msg["To"] = ", ".join(recipients)
     msg.attach(MIMEText(plain_text, "plain", "utf-8"))
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
@@ -332,17 +335,18 @@ def _do_send_smtp(subject: str, html_body: str, plain_text: str) -> None:
         ctx = ssl.create_default_context()
         with smtplib.SMTP_SSL(config.SMTP_HOST, config.SMTP_PORT, context=ctx, timeout=30) as smtp:
             smtp.login(config.SMTP_USER, config.SMTP_PASS)
-            smtp.sendmail(config.SMTP_FROM, config.SMTP_TO, msg.as_string())
+            smtp.sendmail(config.SMTP_FROM, recipients, msg.as_string())
     else:
         with smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT, timeout=30) as smtp:
             smtp.ehlo()
             smtp.starttls()
             smtp.ehlo()
             smtp.login(config.SMTP_USER, config.SMTP_PASS)
-            smtp.sendmail(config.SMTP_FROM, config.SMTP_TO, msg.as_string())
+            smtp.sendmail(config.SMTP_FROM, recipients, msg.as_string())
 
 
-def _send_smtp(subject: str, html_body: str, plain_text: str) -> None:
+def _send_smtp(subject: str, html_body: str, plain_text: str,
+               override_to: Optional[List[str]] = None) -> None:
     """Send an email via SMTP, enforcing a hard wall-clock timeout.
 
     smtplib's per-operation socket timeout does not reliably cover all
@@ -351,7 +355,7 @@ def _send_smtp(subject: str, html_body: str, plain_text: str) -> None:
     from blocking the APScheduler thread pool indefinitely.
     """
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(_do_send_smtp, subject, html_body, plain_text)
+        future = executor.submit(_do_send_smtp, subject, html_body, plain_text, override_to)
         try:
             future.result(timeout=_SMTP_WALL_TIMEOUT)
         except concurrent.futures.TimeoutError:
@@ -365,8 +369,13 @@ def _send_smtp(subject: str, html_body: str, plain_text: str) -> None:
 # Integrity check & watchdog
 # ---------------------------------------------------------------------------
 
-def _send_alert_email(subject: str, html_body: str, plain_text: str):
-    """Send a plain alert email (no digest heading, no AI involved)."""
+def _send_alert_email(subject: str, html_body: str, plain_text: str,
+                      override_to: Optional[List[str]] = None):
+    """Send a plain alert email (no digest heading, no AI involved).
+
+    ``override_to`` is used by the .env tamper check to route the alert to the
+    address stored in the keychain instead of the (potentially tampered) .env.
+    """
     _send_smtp(
         subject=subject,
         html_body=_wrap_email_html(
@@ -375,6 +384,7 @@ def _send_alert_email(subject: str, html_body: str, plain_text: str):
             footer="Sent by Vigil.",
         ),
         plain_text=plain_text,
+        override_to=override_to,
     )
 
 
@@ -385,6 +395,62 @@ def _verify_log_integrity() -> bool:
     expected = INTEGRITY_FILE.read_text().strip()
     actual = hashlib.sha256(ACTIVITY_LOG.read_bytes()).hexdigest()
     return actual == expected
+
+
+def _check_env_integrity():
+    """Alert the accountability partner if .env critical fields have been tampered with."""
+    try:
+        from pin_auth import verify_env_hash, get_original_smtp_to
+    except ImportError:
+        return  # pin_auth not available; skip silently
+
+    try:
+        ok = verify_env_hash()
+    except Exception:
+        return  # keychain unavailable or hash not yet stored; skip silently
+
+    if ok:
+        return
+
+    _log("⚠️ .env integrity check failed — critical settings may have been tampered with.")
+
+    # Determine the best recipient: use original SMTP_TO from keychain if available,
+    # falling back to whatever is in the (possibly tampered) config.
+    try:
+        original_to_str = get_original_smtp_to()
+        original_to: Optional[List[str]] = [original_to_str] if original_to_str else None
+    except Exception:
+        original_to = None
+
+    override_to: Optional[List[str]] = original_to or getattr(config, "SMTP_TO", None)
+
+    html_body = """
+    <h2>⚠️ Configuration Tampering Detected</h2>
+    <p>The <code>.env</code> settings file has been modified outside of the
+    <em>vigil update</em> command.</p>
+    <p>Critical fields (SMTP credentials, alert recipient, or alert switch)
+    no longer match the snapshot stored in the system keychain.</p>
+    <p style="color:#888; font-size:0.9em;">
+    This message was sent to the address stored securely on this device,
+    which may differ from the current .env recipient if tampering occurred.
+    </p>
+    """
+    plain_text = (
+        "⚠️ Configuration Tampering Detected\n\n"
+        "The .env settings file has been modified outside of the vigil update command.\n"
+        "Critical fields (SMTP credentials, alert recipient, or alert switch) no longer\n"
+        "match the snapshot stored in the system keychain.\n"
+    )
+
+    try:
+        _send_alert_email(
+            subject="⚠️ Vigil — Configuration Tampering Detected",
+            html_body=html_body,
+            plain_text=plain_text,
+            override_to=override_to,
+        )
+    except Exception as exc:
+        _log(f"Failed to send .env tamper alert: {exc}")
 
 
 _tracker_was_running: bool = True  # module-level state for edge-transition alerting
@@ -519,6 +585,9 @@ def _send_email(subject: str, html_body: str):
 def run_summary():
     """Called by APScheduler on every trigger. Sends digest if not already sent."""
     _log(f"Summary job triggered (schedule: {config.SUMMARY_SCHEDULE}).")
+
+    # Check .env integrity first — alert partner if settings were tampered with.
+    _check_env_integrity()
 
     if not _verify_log_integrity():
         _log("⚠️ Log integrity check failed — possible tampering detected.")

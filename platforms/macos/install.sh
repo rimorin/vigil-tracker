@@ -212,6 +212,15 @@ if [[ "${1:-}" == "--update" ]]; then
     fi
     [[ -z "$PYTHON_PATH" ]] && { echo "python not found — cannot manage partner PIN."; PYTHON_PATH="python"; }
 
+    # ── Partner PIN verification (required before any settings can change) ──
+    if "$PYTHON_PATH" "$REPO_ROOT/pin_auth.py" status &>/dev/null; then
+        echo -e "  ${BOLD}🔒  A partner PIN is required to update settings.${NC}"
+        if ! "$PYTHON_PATH" "$REPO_ROOT/pin_auth.py" verify; then
+            echo -e "${RED}[update] Update aborted — PIN verification failed.${NC}"
+            exit 1
+        fi
+    fi
+
     # Inline helpers (use system python; venv may not be set up yet)
     _read_env() {
         local key="$1" val
@@ -401,10 +410,10 @@ PYEOF
     fi
 
     echo ""
+    # Snapshot the (now-updated) .env so the summariser can detect future tampering.
+    "$PYTHON_PATH" "$REPO_ROOT/pin_auth.py" env_store 2>/dev/null || true
     exit 0
 fi
-
-# ── --blocklist flag ───────────────────────────────────────────────────────
 if [[ "${1:-}" == "--blocklist" ]]; then
     BLOCKLIST_FILE="$REPO_ROOT/data/domains.txt"
     BLOCKLIST_URL="https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn-only/hosts"
@@ -449,6 +458,22 @@ REINSTALL=false
 if [[ "${1:-}" == "--reinstall" ]]; then
     REINSTALL=true
     info "Reinstall mode — skipping wizard and credential checks."
+    # Resolve Python early so we can run the PIN check before proceeding.
+    _VENV_DIR_EARLY="$REPO_ROOT/.venv"
+    if [[ -x "$_VENV_DIR_EARLY/bin/python" ]]; then
+        _PIN_PYTHON="$_VENV_DIR_EARLY/bin/python"
+    elif command -v pyenv &>/dev/null; then
+        _PIN_PYTHON="$(pyenv which python 2>/dev/null)" || _PIN_PYTHON="$(command -v python 2>/dev/null || true)"
+    else
+        _PIN_PYTHON="$(command -v python 2>/dev/null || true)"
+    fi
+    if [[ -n "$_PIN_PYTHON" ]] && "$_PIN_PYTHON" "$REPO_ROOT/pin_auth.py" status &>/dev/null; then
+        echo -e "  ${BOLD}🔒  A partner PIN is required to reinstall.${NC}"
+        if ! "$_PIN_PYTHON" "$REPO_ROOT/pin_auth.py" verify; then
+            echo -e "${RED}[reinstall] Reinstall aborted — PIN verification failed.${NC}"
+            exit 1
+        fi
+    fi
 fi
 
 # ── Prerequisites ──────────────────────────────────────────────────────────
@@ -1005,6 +1030,10 @@ else
     echo "  (re-enter your SMTP credentials)"
     echo ""
 fi
+
+# ── Snapshot .env integrity baseline ──────────────────────────────────────
+# Stored in the OS keychain so the summariser can detect silent .env edits.
+"$PYTHON_PATH" "$REPO_ROOT/pin_auth.py" env_store 2>/dev/null || true
 
 # ── Done ───────────────────────────────────────────────────────────────────
 echo ""
