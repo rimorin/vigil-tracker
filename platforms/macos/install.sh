@@ -112,7 +112,7 @@ launchctl_service_status() {
     if (( MACOS_MAJOR >= 13 )); then
         local state
         state=$(launchctl print "gui/${USER_UID}/${label}" 2>/dev/null \
-            | grep -E "^\s+state\s*=" | awk '{print $3}') || true
+            | grep -E "^\s+state\s*=" | head -1 | awk '{print $3}') || true
         [[ -n "$state" ]] && echo "$state" || echo "not loaded"
     else
         local pid exit_code
@@ -135,7 +135,7 @@ if [[ "${1:-}" == "--status" ]]; then
     echo ""
     echo -e "${BOLD}${GREEN}━━━━  Vigil — Status  ━━━━${NC}"
     echo ""
-    for label in com.vigil.tracker com.vigil.summarizer; do
+    for label in com.vigil.tracker com.vigil.summarizer com.vigil.watchdog; do
         svc_status=$(launchctl_service_status "$label")
         echo -e "  ${BOLD}${label}${NC}: ${svc_status}"
     done
@@ -180,7 +180,7 @@ if [[ "${1:-}" == "--status" ]]; then
             echo ""
         fi
     done
-    for log in tracker_stderr.log summarizer_stderr.log; do
+    for log in tracker_stderr.log summarizer_stderr.log watchdog_stderr.log; do
         log_path="$HOME/Library/Logs/Vigil/$log"
         if [[ -f "$log_path" ]] && [[ -s "$log_path" ]]; then
             echo -e "${YELLOW}── ${log} (last 5 lines) ──${NC}"
