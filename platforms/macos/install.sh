@@ -550,6 +550,7 @@ EOF
 fi
 
 # ── Setup wizard — create / complete .env ─────────────────────────────────
+REQUIRED_VARS=(SMTP_USER SMTP_HOST SMTP_PASS SMTP_TO)
 if [[ "$REINSTALL" == false ]]; then
 
 step "Checking configuration..."
@@ -601,7 +602,6 @@ if [[ -n "$_existing_smtp_user" ]]; then
 fi
 
 # SMTP_USER is listed first so we can auto-detect SMTP_HOST/PORT from it.
-REQUIRED_VARS=(SMTP_USER SMTP_HOST SMTP_PASS SMTP_TO)
 MISSING_VARS=()
 for var in "${REQUIRED_VARS[@]}"; do
     val=$(read_env_value "$var")

@@ -767,30 +767,14 @@ def run_summary():
     try:
         summary_html = _summarise_with_openai(entries, domain_times)
     except Exception as exc:
-        _log(f"OpenAI error: {exc}")
-        try:
-            _send_alert_email(
-                subject=f"⚠️ Vigil Digest Failed — {today_str}",
-                html_body=f"""
-                <h2>⚠️ Digest Could Not Be Generated</h2>
-                <p>The AI summarisation step failed for <strong>{today_str}</strong>.</p>
-                <p><strong>Error:</strong> <code>{exc}</code></p>
-                <p style="color:#888; font-size:0.9em;">
-                  Your browsing activity was still logged normally.
-                  The digest will be attempted again on the next scheduled run.
-                </p>
-                """,
-                plain_text=(
-                    f"⚠️ Digest Could Not Be Generated\n\n"
-                    f"The AI summarisation step failed for {today_str}.\n"
-                    f"Error: {exc}\n\n"
-                    f"Your browsing activity was still logged normally.\n"
-                    f"The digest will be attempted again on the next scheduled run."
-                ),
-            )
-        except Exception as alert_exc:
-            _log(f"Failed to send OpenAI failure alert: {alert_exc}")
-        return
+        _log(f"OpenAI error: {exc} — sending plain digest without AI summary.")
+        summary_html = (
+            '<p style="color:#e67e22; background:#fef9e7; padding:10px 12px; '
+            'border-left:4px solid #e67e22; margin-bottom:16px;">'
+            '<strong>⚠️ AI summary unavailable</strong> — the AI summarisation step '
+            f'failed (<code>{exc}</code>). The time breakdown below was generated '
+            'without AI.</p>'
+        )
 
     subject = f"Your Vigil Digest — {today_str}"
 
